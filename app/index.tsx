@@ -88,7 +88,7 @@ export default function LogifyMakersApp() {
       if (discordSuccess) {
         Alert.alert(
           'Request Submitted Successfully! 🎉', 
-          `Thank you ${clientName}! Your ${serviceType.toLowerCase()} request has been sent to our Discord channel. Our team will review it and contact you soon via ${contactInfo}.\n\nJoin our Discord for real-time updates!`,
+          `Thank you ${clientName}! Your ${serviceType.toLowerCase()} request has been ${DiscordService.isWebhookConfigured() ? 'sent to our Discord channel' : 'saved (webhook not configured)'}. Our team will review it and contact you soon via ${contactInfo}.\n\nJoin our Discord for real-time updates!`,
           [
             {
               text: 'Join Discord',
@@ -134,10 +134,11 @@ export default function LogifyMakersApp() {
   };
 
   const toggleOrderStatus = () => {
+    // Check if user is admin before allowing toggle
     if (!isAdmin()) {
       Alert.alert(
-        'Access Denied',
-        'Only administrators can change the order status. Please contact an admin if you need to make changes.',
+        'Access Denied ❌',
+        "You're not an admin. Only users with 'owner' or 'admin' roles can change the order status.\n\nContact an admin on Discord if you need to make changes.",
         [
           {
             text: 'Join Discord',
@@ -149,11 +150,13 @@ export default function LogifyMakersApp() {
           }
         ]
       );
+      console.log(`Non-admin user ${user?.discord_username || 'Anonymous'} attempted to change order status`);
       return;
     }
 
+    // If user is admin, allow the toggle (this will be handled by AdminPanel)
     setOrderAcceptStatus(!orderAcceptStatus);
-    console.log('Order status changed to:', !orderAcceptStatus ? 'Accepting' : 'Not Accepting');
+    console.log(`Admin ${user?.discord_username} changed order status to:`, !orderAcceptStatus ? 'Accepting' : 'Not Accepting');
   };
 
   if (loading) {
@@ -193,6 +196,19 @@ export default function LogifyMakersApp() {
                 <Text style={[commonStyles.text, { fontSize: 12 }]}>
                   Welcome, {user.discord_username}
                 </Text>
+                {isAdmin() && (
+                  <View style={{
+                    backgroundColor: user.roles.includes('owner') ? colors.warning : colors.accent,
+                    paddingHorizontal: 6,
+                    paddingVertical: 2,
+                    borderRadius: 8,
+                    marginLeft: 8,
+                  }}>
+                    <Text style={{ color: 'white', fontSize: 8, fontWeight: 'bold' }}>
+                      {user.roles.includes('owner') ? 'OWNER' : 'ADMIN'}
+                    </Text>
+                  </View>
+                )}
               </View>
             )}
           </View>
@@ -237,7 +253,7 @@ export default function LogifyMakersApp() {
               </Text>
             </TouchableOpacity>
             <Text style={[commonStyles.text, { fontSize: 12, textAlign: 'center', marginTop: 10, opacity: 0.7 }]}>
-              {isAdmin() ? 'Tap to toggle status' : 'Contact admin to change status'}
+              {isAdmin() ? 'Tap to toggle status (Admin)' : 'Only admins can change status'}
             </Text>
           </View>
 
@@ -358,7 +374,7 @@ export default function LogifyMakersApp() {
                   <Text style={{ color: 'white', fontWeight: 'bold', textAlign: 'center' }}>
                     ⚠️ Orders are currently closed
                   </Text>
-                  <Text style={{ color: 'white', fontSize: 12, textAlign: 'center', marginTop: 5 }]}>
+                  <Text style={{ color: 'white', fontSize: 12, textAlign: 'center', marginTop: 5 }}>
                     You can still submit a request, but it will be queued until we reopen
                   </Text>
                 </View>
@@ -366,7 +382,7 @@ export default function LogifyMakersApp() {
 
               {/* Discord Integration Notice */}
               <View style={{
-                backgroundColor: '#5865F2',
+                backgroundColor: DiscordService.isWebhookConfigured() ? '#5865F2' : colors.warning,
                 padding: 15,
                 borderRadius: 10,
                 marginBottom: 20,
@@ -374,10 +390,13 @@ export default function LogifyMakersApp() {
               }}>
                 <Icon name="logo-discord" size={20} color="white" style={{ marginBottom: 5 }} />
                 <Text style={{ color: 'white', fontWeight: 'bold', textAlign: 'center', fontSize: 14 }}>
-                  🚀 Discord Integration Active
+                  {DiscordService.isWebhookConfigured() ? '🚀 Discord Integration Active' : '⚠️ Discord Webhook Not Configured'}
                 </Text>
                 <Text style={{ color: 'white', fontSize: 12, textAlign: 'center', marginTop: 5 }}>
-                  Your request will be sent directly to our Discord channel for faster processing!
+                  {DiscordService.isWebhookConfigured() 
+                    ? 'Your request will be sent directly to our Discord channel for faster processing!'
+                    : 'Requests will be saved locally. Ask an admin to configure the webhook for Discord integration.'
+                  }
                 </Text>
               </View>
 
@@ -488,7 +507,7 @@ export default function LogifyMakersApp() {
             </Text>
             {user && (
               <Text style={[commonStyles.text, { fontSize: 10, opacity: 0.5, textAlign: 'center', marginTop: 5 }]}>
-                Connected as {user.discord_username} • Discord Integration Active
+                Connected as {user.discord_username} • {DiscordService.isWebhookConfigured() ? 'Discord Integration Active' : 'Webhook Not Configured'}
               </Text>
             )}
           </View>

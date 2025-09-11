@@ -1,347 +1,353 @@
-import { Text, View, TextInput, ScrollView, TouchableOpacity, Alert } from 'react-native';
-import { useState, useEffect } from 'react';
-import * as Speech from 'expo-speech';
-import { commonStyles } from '../styles/commonStyles';
+
+import { Text, View, TextInput, ScrollView, TouchableOpacity, Alert, Linking } from 'react-native';
+import { useState } from 'react';
+import { commonStyles, colors } from '../styles/commonStyles';
 import Button from '../components/Button';
 import Icon from '../components/Icon';
 
-export default function TextToVoiceApp() {
-  const [text, setText] = useState('');
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(true);
-  const [speechRate, setSpeechRate] = useState(1.0);
-  const [speechPitch, setSpeechPitch] = useState(1.0);
-  const [selectedLanguage, setSelectedLanguage] = useState('en-US');
-  const [showSettings, setShowSettings] = useState(false);
+export default function LogifyMakersApp() {
+  const [showRequestForm, setShowRequestForm] = useState(false);
+  const [orderAcceptStatus, setOrderAcceptStatus] = useState(true); // true = accepting orders (green), false = not accepting (red)
+  
+  // Form state
+  const [clientName, setClientName] = useState('');
+  const [serviceType, setServiceType] = useState('');
+  const [description, setDescription] = useState('');
+  const [budget, setBudget] = useState('');
+  const [contactInfo, setContactInfo] = useState('');
 
-  const languages = [
-    { code: 'en-US', name: 'English (US)' },
-    { code: 'en-GB', name: 'English (UK)' },
-    { code: 'es-ES', name: 'Spanish' },
-    { code: 'fr-FR', name: 'French' },
-    { code: 'de-DE', name: 'German' },
-    { code: 'it-IT', name: 'Italian' },
-    { code: 'pt-BR', name: 'Portuguese' },
-    { code: 'ja-JP', name: 'Japanese' },
-    { code: 'ko-KR', name: 'Korean' },
-    { code: 'zh-CN', name: 'Chinese' },
+  const services = [
+    'Logo Design',
+    'YouTube Banner',
+    'Professional Profile Photo',
+    'YouTube Thumbnail',
+    'Custom Design'
   ];
 
-  useEffect(() => {
-    console.log('Text-to-Voice app initialized');
-    return () => {
-      // Stop speech when component unmounts
-      Speech.stop();
-    };
-  }, []);
+  const handleDiscordLink = async () => {
+    const discordUrl = 'https://discord.gg/7kj6eHGrAS';
+    try {
+      const supported = await Linking.canOpenURL(discordUrl);
+      if (supported) {
+        await Linking.openURL(discordUrl);
+        console.log('Opening Discord link');
+      } else {
+        Alert.alert('Error', 'Cannot open Discord link');
+      }
+    } catch (error) {
+      console.error('Error opening Discord link:', error);
+      Alert.alert('Error', 'Failed to open Discord link');
+    }
+  };
 
-  const handleSpeak = async () => {
-    if (!text.trim()) {
-      Alert.alert('Error', 'Please enter some text to speak');
+  const handleSubmitRequest = () => {
+    if (!clientName.trim() || !serviceType || !description.trim() || !contactInfo.trim()) {
+      Alert.alert('Error', 'Please fill in all required fields');
       return;
     }
 
-    try {
-      if (isSpeaking) {
-        console.log('Stopping speech');
-        Speech.stop();
-        setIsSpeaking(false);
-      } else {
-        console.log('Starting speech with text:', text.substring(0, 50) + '...');
-        setIsSpeaking(true);
-        
-        await Speech.speak(text, {
-          language: selectedLanguage,
-          pitch: speechPitch,
-          rate: speechRate,
-          onStart: () => {
-            console.log('Speech started');
-            setIsSpeaking(true);
-          },
-          onDone: () => {
-            console.log('Speech completed');
-            setIsSpeaking(false);
-          },
-          onStopped: () => {
-            console.log('Speech stopped');
-            setIsSpeaking(false);
-          },
-          onError: (error) => {
-            console.log('Speech error:', error);
-            setIsSpeaking(false);
-            Alert.alert('Error', 'Failed to speak text. Please try again.');
-          },
-        });
-      }
-    } catch (error) {
-      console.error('Speech error:', error);
-      setIsSpeaking(false);
-      Alert.alert('Error', 'Failed to speak text. Please try again.');
+    if (!orderAcceptStatus) {
+      Alert.alert('Orders Closed', 'Sorry, we are not accepting new orders at the moment. Please check back later or join our Discord for updates.');
+      return;
     }
+
+    console.log('Submitting request:', {
+      clientName,
+      serviceType,
+      description,
+      budget,
+      contactInfo
+    });
+
+    Alert.alert(
+      'Request Submitted!', 
+      `Thank you ${clientName}! Your ${serviceType.toLowerCase()} request has been submitted. We'll contact you soon via ${contactInfo}. Join our Discord for updates!`,
+      [
+        {
+          text: 'Join Discord',
+          onPress: handleDiscordLink
+        },
+        {
+          text: 'OK',
+          style: 'default'
+        }
+      ]
+    );
+
+    // Clear form
+    setClientName('');
+    setServiceType('');
+    setDescription('');
+    setBudget('');
+    setContactInfo('');
+    setShowRequestForm(false);
   };
 
-  const handleClearText = () => {
-    setText('');
-    if (isSpeaking) {
-      Speech.stop();
-      setIsSpeaking(false);
-    }
+  const toggleOrderStatus = () => {
+    setOrderAcceptStatus(!orderAcceptStatus);
+    console.log('Order status changed to:', !orderAcceptStatus ? 'Accepting' : 'Not Accepting');
   };
-
-  const handlePasteText = async () => {
-    try {
-      // For web, we can use the clipboard API
-      if (typeof navigator !== 'undefined' && navigator.clipboard) {
-        const clipboardText = await navigator.clipboard.readText();
-        setText(clipboardText);
-        console.log('Text pasted from clipboard');
-      } else {
-        Alert.alert('Info', 'Paste functionality not available on this platform');
-      }
-    } catch (error) {
-      console.log('Clipboard error:', error);
-      Alert.alert('Error', 'Could not access clipboard');
-    }
-  };
-
-  const currentStyles = isDarkMode ? commonStyles : commonStyles; // We'll use dark mode styles
 
   return (
-    <View style={currentStyles.container}>
+    <View style={commonStyles.container}>
       <ScrollView style={{ flex: 1, width: '100%' }} contentContainerStyle={{ flexGrow: 1 }}>
-        <View style={currentStyles.content}>
+        <View style={commonStyles.content}>
           {/* Header */}
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', paddingHorizontal: 20, marginBottom: 20 }}>
-            <Text style={[currentStyles.title, { fontSize: 28 }]}>Text to Voice</Text>
-            <TouchableOpacity
-              onPress={() => setShowSettings(!showSettings)}
-              style={{ padding: 10 }}
-            >
-              <Icon name="settings-outline" size={24} />
-            </TouchableOpacity>
+          <View style={{ alignItems: 'center', marginBottom: 30, paddingHorizontal: 20 }}>
+            <Text style={[commonStyles.title, { fontSize: 32, marginBottom: 10 }]}>
+              Logify Makers
+            </Text>
+            <Text style={[commonStyles.text, { fontSize: 18, textAlign: 'center', opacity: 0.8 }]}>
+              Professional Design Services
+            </Text>
           </View>
 
-          {/* Settings Panel */}
-          {showSettings && (
-            <View style={[currentStyles.card, { marginHorizontal: 20, marginBottom: 20 }]}>
-              <Text style={[currentStyles.text, { fontSize: 18, fontWeight: 'bold', marginBottom: 15 }]}>Settings</Text>
-              
-              {/* Dark Mode Toggle */}
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
-                <Text style={currentStyles.text}>Dark Mode</Text>
-                <TouchableOpacity
-                  onPress={() => setIsDarkMode(!isDarkMode)}
+          {/* Order Status Indicator */}
+          <View style={[commonStyles.card, { marginHorizontal: 20, marginBottom: 20, alignItems: 'center' }]}>
+            <Text style={[commonStyles.text, { fontSize: 18, fontWeight: 'bold', marginBottom: 15 }]}>
+              Current Order Status
+            </Text>
+            <TouchableOpacity
+              onPress={toggleOrderStatus}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: orderAcceptStatus ? colors.success : colors.error,
+                paddingHorizontal: 20,
+                paddingVertical: 12,
+                borderRadius: 25,
+                boxShadow: '0px 3px 6px rgba(0, 0, 0, 0.3)',
+                elevation: 3,
+              }}
+            >
+              <View
+                style={{
+                  width: 12,
+                  height: 12,
+                  borderRadius: 6,
+                  backgroundColor: 'white',
+                  marginRight: 10,
+                }}
+              />
+              <Text style={{ color: 'white', fontSize: 16, fontWeight: 'bold' }}>
+                {orderAcceptStatus ? 'ACCEPTING ORDERS' : 'ORDERS CLOSED'}
+              </Text>
+            </TouchableOpacity>
+            <Text style={[commonStyles.text, { fontSize: 12, textAlign: 'center', marginTop: 10, opacity: 0.7 }]}>
+              Tap to toggle status (Admin only)
+            </Text>
+          </View>
+
+          {/* About Us Section */}
+          <View style={[commonStyles.card, { marginHorizontal: 20, marginBottom: 20 }]}>
+            <Text style={[commonStyles.text, { fontSize: 20, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' }]}>
+              About Us
+            </Text>
+            <Text style={[commonStyles.text, { fontSize: 16, textAlign: 'center', lineHeight: 24 }]}>
+              We Logify Makers create logos, Banner for YouTube, Professional Profile Photos, Thumbnails for very cheap. We offer best service and support.
+            </Text>
+          </View>
+
+          {/* Services Grid */}
+          <View style={[commonStyles.card, { marginHorizontal: 20, marginBottom: 20 }]}>
+            <Text style={[commonStyles.text, { fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' }]}>
+              Our Services
+            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+              {services.slice(0, 4).map((service, index) => (
+                <View
+                  key={index}
                   style={{
-                    width: 50,
-                    height: 30,
-                    borderRadius: 15,
-                    backgroundColor: isDarkMode ? '#64B5F6' : '#ccc',
-                    justifyContent: 'center',
-                    paddingHorizontal: 3,
+                    width: '48%',
+                    backgroundColor: colors.backgroundAlt,
+                    padding: 15,
+                    borderRadius: 10,
+                    marginBottom: 10,
+                    alignItems: 'center',
+                    borderWidth: 1,
+                    borderColor: colors.border,
                   }}
                 >
-                  <View
-                    style={{
-                      width: 24,
-                      height: 24,
-                      borderRadius: 12,
-                      backgroundColor: 'white',
-                      alignSelf: isDarkMode ? 'flex-end' : 'flex-start',
-                    }}
+                  <Icon 
+                    name={
+                      service === 'Logo Design' ? 'brush-outline' :
+                      service === 'YouTube Banner' ? 'image-outline' :
+                      service === 'Professional Profile Photo' ? 'person-circle-outline' :
+                      'play-outline'
+                    } 
+                    size={24} 
+                    style={{ marginBottom: 8 }}
                   />
-                </TouchableOpacity>
-              </View>
-
-              {/* Language Selection */}
-              <Text style={[currentStyles.text, { marginBottom: 10 }]}>Language</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 15 }}>
-                {languages.map((lang) => (
-                  <TouchableOpacity
-                    key={lang.code}
-                    onPress={() => setSelectedLanguage(lang.code)}
-                    style={{
-                      backgroundColor: selectedLanguage === lang.code ? '#64B5F6' : '#2a2a2a',
-                      paddingHorizontal: 12,
-                      paddingVertical: 8,
-                      borderRadius: 20,
-                      marginRight: 10,
-                    }}
-                  >
-                    <Text style={[currentStyles.text, { fontSize: 14 }]}>{lang.name}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-
-              {/* Speech Rate */}
-              <Text style={[currentStyles.text, { marginBottom: 10 }]}>Speed: {speechRate.toFixed(1)}x</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15 }}>
-                <TouchableOpacity
-                  onPress={() => setSpeechRate(Math.max(0.1, speechRate - 0.1))}
-                  style={{ backgroundColor: '#64B5F6', padding: 10, borderRadius: 5, marginRight: 10 }}
-                >
-                  <Text style={{ color: 'white', fontWeight: 'bold' }}>-</Text>
-                </TouchableOpacity>
-                <View style={{ flex: 1, height: 4, backgroundColor: '#2a2a2a', borderRadius: 2 }}>
-                  <View
-                    style={{
-                      width: `${(speechRate / 2) * 100}%`,
-                      height: '100%',
-                      backgroundColor: '#64B5F6',
-                      borderRadius: 2,
-                    }}
-                  />
+                  <Text style={[commonStyles.text, { fontSize: 12, textAlign: 'center' }]}>
+                    {service}
+                  </Text>
                 </View>
-                <TouchableOpacity
-                  onPress={() => setSpeechRate(Math.min(2.0, speechRate + 0.1))}
-                  style={{ backgroundColor: '#64B5F6', padding: 10, borderRadius: 5, marginLeft: 10 }}
-                >
-                  <Text style={{ color: 'white', fontWeight: 'bold' }}>+</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Speech Pitch */}
-              <Text style={[currentStyles.text, { marginBottom: 10 }]}>Pitch: {speechPitch.toFixed(1)}</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <TouchableOpacity
-                  onPress={() => setSpeechPitch(Math.max(0.5, speechPitch - 0.1))}
-                  style={{ backgroundColor: '#64B5F6', padding: 10, borderRadius: 5, marginRight: 10 }}
-                >
-                  <Text style={{ color: 'white', fontWeight: 'bold' }}>-</Text>
-                </TouchableOpacity>
-                <View style={{ flex: 1, height: 4, backgroundColor: '#2a2a2a', borderRadius: 2 }}>
-                  <View
-                    style={{
-                      width: `${((speechPitch - 0.5) / 1.5) * 100}%`,
-                      height: '100%',
-                      backgroundColor: '#64B5F6',
-                      borderRadius: 2,
-                    }}
-                  />
-                </View>
-                <TouchableOpacity
-                  onPress={() => setSpeechPitch(Math.min(2.0, speechPitch + 0.1))}
-                  style={{ backgroundColor: '#64B5F6', padding: 10, borderRadius: 5, marginLeft: 10 }}
-                >
-                  <Text style={{ color: 'white', fontWeight: 'bold' }}>+</Text>
-                </TouchableOpacity>
-              </View>
+              ))}
             </View>
-          )}
-
-          {/* Text Input Area */}
-          <View style={[currentStyles.card, { marginHorizontal: 20, marginBottom: 20, minHeight: 200 }]}>
-            <Text style={[currentStyles.text, { fontSize: 16, fontWeight: 'bold', marginBottom: 10 }]}>
-              Enter text to speak:
-            </Text>
-            <TextInput
-              style={{
-                flex: 1,
-                color: currentStyles.text.color,
-                fontSize: 16,
-                textAlignVertical: 'top',
-                padding: 10,
-                backgroundColor: '#1a1a1a',
-                borderRadius: 8,
-                borderWidth: 1,
-                borderColor: '#333',
-                minHeight: 150,
-              }}
-              multiline
-              placeholder="Type or paste your text here..."
-              placeholderTextColor="#666"
-              value={text}
-              onChangeText={setText}
-            />
-            <Text style={[currentStyles.text, { fontSize: 12, marginTop: 5, opacity: 0.7 }]}>
-              Characters: {text.length}
-            </Text>
           </View>
 
-          {/* Action Buttons */}
-          <View style={{ paddingHorizontal: 20, width: '100%' }}>
-            <View style={{ flexDirection: 'row', marginBottom: 15 }}>
-              <TouchableOpacity
-                onPress={handlePasteText}
-                style={{
-                  flex: 1,
-                  backgroundColor: '#2a2a2a',
-                  padding: 15,
-                  borderRadius: 10,
-                  marginRight: 10,
-                  alignItems: 'center',
-                }}
-              >
-                <Icon name="clipboard-outline" size={20} />
-                <Text style={[currentStyles.text, { marginTop: 5, fontSize: 12 }]}>Paste</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={handleClearText}
-                style={{
-                  flex: 1,
-                  backgroundColor: '#2a2a2a',
-                  padding: 15,
-                  borderRadius: 10,
-                  marginLeft: 10,
-                  alignItems: 'center',
-                }}
-              >
-                <Icon name="trash-outline" size={20} />
-                <Text style={[currentStyles.text, { marginTop: 5, fontSize: 12 }]}>Clear</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Main Speak Button */}
+          {/* Discord Link */}
+          <View style={{ paddingHorizontal: 20, width: '100%', marginBottom: 20 }}>
             <TouchableOpacity
-              onPress={handleSpeak}
+              onPress={handleDiscordLink}
               style={{
-                backgroundColor: isSpeaking ? '#ff4444' : '#64B5F6',
-                padding: 20,
-                borderRadius: 15,
-                alignItems: 'center',
+                backgroundColor: '#5865F2',
+                padding: 15,
+                borderRadius: 12,
                 flexDirection: 'row',
+                alignItems: 'center',
                 justifyContent: 'center',
-                boxShadow: '0px 4px 8px rgba(0, 0, 0, 0.3)',
-                elevation: 4,
+                boxShadow: '0px 3px 6px rgba(0, 0, 0, 0.3)',
+                elevation: 3,
               }}
             >
-              <Icon 
-                name={isSpeaking ? "stop" : "play"} 
-                size={24} 
-                style={{ marginRight: 10 }} 
-              />
-              <Text style={{
-                color: 'white',
-                fontSize: 18,
-                fontWeight: 'bold',
-              }}>
-                {isSpeaking ? 'Stop Speaking' : 'Start Speaking'}
+              <Icon name="logo-discord" size={24} style={{ marginRight: 10 }} />
+              <Text style={{ color: 'white', fontSize: 16, fontWeight: 'bold' }}>
+                Join Our Discord
               </Text>
             </TouchableOpacity>
           </View>
 
-          {/* Status Indicator */}
-          {isSpeaking && (
-            <View style={{ marginTop: 20, alignItems: 'center' }}>
-              <View style={{
-                backgroundColor: '#64B5F6',
-                paddingHorizontal: 20,
-                paddingVertical: 10,
-                borderRadius: 20,
+          {/* Add Request Button */}
+          <View style={{ paddingHorizontal: 20, width: '100%', marginBottom: 20 }}>
+            <TouchableOpacity
+              onPress={() => setShowRequestForm(!showRequestForm)}
+              style={{
+                backgroundColor: colors.accent,
+                padding: 18,
+                borderRadius: 12,
                 flexDirection: 'row',
                 alignItems: 'center',
-              }}>
+                justifyContent: 'center',
+                boxShadow: '0px 3px 6px rgba(0, 0, 0, 0.3)',
+                elevation: 3,
+              }}
+            >
+              <Icon name={showRequestForm ? "close" : "add"} size={24} style={{ marginRight: 10 }} />
+              <Text style={{ color: 'white', fontSize: 16, fontWeight: 'bold' }}>
+                {showRequestForm ? 'Close Request Form' : 'Add Request'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Request Form */}
+          {showRequestForm && (
+            <View style={[commonStyles.card, { marginHorizontal: 20, marginBottom: 20 }]}>
+              <Text style={[commonStyles.text, { fontSize: 18, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' }]}>
+                Submit Your Request
+              </Text>
+
+              {/* Order Status Check */}
+              {!orderAcceptStatus && (
                 <View style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: 4,
-                  backgroundColor: 'white',
-                  marginRight: 10,
-                  opacity: 0.8,
-                }} />
-                <Text style={{ color: 'white', fontWeight: 'bold' }}>Speaking...</Text>
-              </View>
+                  backgroundColor: colors.error,
+                  padding: 15,
+                  borderRadius: 10,
+                  marginBottom: 20,
+                  alignItems: 'center'
+                }}>
+                  <Text style={{ color: 'white', fontWeight: 'bold', textAlign: 'center' }}>
+                    ⚠️ Orders are currently closed
+                  </Text>
+                  <Text style={{ color: 'white', fontSize: 12, textAlign: 'center', marginTop: 5 }}>
+                    You can still submit a request, but it won&apos;t be processed until we reopen
+                  </Text>
+                </View>
+              )}
+
+              {/* Client Name */}
+              <Text style={[commonStyles.text, { marginBottom: 8 }]}>Your Name *</Text>
+              <TextInput
+                style={[commonStyles.textInput, { marginBottom: 15, minHeight: 50 }]}
+                placeholder="Enter your name"
+                placeholderTextColor="#666"
+                value={clientName}
+                onChangeText={setClientName}
+              />
+
+              {/* Service Type */}
+              <Text style={[commonStyles.text, { marginBottom: 8 }]}>Service Type *</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 15 }}>
+                {services.map((service) => (
+                  <TouchableOpacity
+                    key={service}
+                    onPress={() => setServiceType(service)}
+                    style={{
+                      backgroundColor: serviceType === service ? colors.accent : colors.backgroundAlt,
+                      paddingHorizontal: 15,
+                      paddingVertical: 10,
+                      borderRadius: 20,
+                      marginRight: 10,
+                      borderWidth: 1,
+                      borderColor: serviceType === service ? colors.accent : colors.border,
+                    }}
+                  >
+                    <Text style={[commonStyles.text, { 
+                      fontSize: 14, 
+                      color: serviceType === service ? 'white' : colors.text 
+                    }]}>
+                      {service}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              {/* Description */}
+              <Text style={[commonStyles.text, { marginBottom: 8 }]}>Description *</Text>
+              <TextInput
+                style={[commonStyles.textInput, { marginBottom: 15, minHeight: 100 }]}
+                placeholder="Describe your project in detail..."
+                placeholderTextColor="#666"
+                value={description}
+                onChangeText={setDescription}
+                multiline
+              />
+
+              {/* Budget */}
+              <Text style={[commonStyles.text, { marginBottom: 8 }]}>Budget (Optional)</Text>
+              <TextInput
+                style={[commonStyles.textInput, { marginBottom: 15, minHeight: 50 }]}
+                placeholder="Your budget range"
+                placeholderTextColor="#666"
+                value={budget}
+                onChangeText={setBudget}
+              />
+
+              {/* Contact Info */}
+              <Text style={[commonStyles.text, { marginBottom: 8 }]}>Contact Information *</Text>
+              <TextInput
+                style={[commonStyles.textInput, { marginBottom: 20, minHeight: 50 }]}
+                placeholder="Discord username, email, or phone"
+                placeholderTextColor="#666"
+                value={contactInfo}
+                onChangeText={setContactInfo}
+              />
+
+              {/* Submit Button */}
+              <TouchableOpacity
+                onPress={handleSubmitRequest}
+                style={{
+                  backgroundColor: orderAcceptStatus ? colors.success : colors.warning,
+                  padding: 15,
+                  borderRadius: 10,
+                  alignItems: 'center',
+                  boxShadow: '0px 3px 6px rgba(0, 0, 0, 0.3)',
+                  elevation: 3,
+                }}
+              >
+                <Text style={{ color: 'white', fontSize: 16, fontWeight: 'bold' }}>
+                  {orderAcceptStatus ? 'Submit Request' : 'Submit Anyway'}
+                </Text>
+              </TouchableOpacity>
             </View>
           )}
+
+          {/* Footer */}
+          <View style={{ paddingHorizontal: 20, paddingBottom: 30, alignItems: 'center' }}>
+            <Text style={[commonStyles.text, { fontSize: 12, opacity: 0.6, textAlign: 'center' }]}>
+              © 2024 Logify Makers - Professional Design Services
+            </Text>
+          </View>
         </View>
       </ScrollView>
     </View>

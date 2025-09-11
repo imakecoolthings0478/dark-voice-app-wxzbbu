@@ -20,8 +20,8 @@ interface DiscordWebhookPayload {
 }
 
 export class DiscordService {
-  // Replace this with your actual Discord webhook URL
-  private static WEBHOOK_URL = 'https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN';
+  // Updated with your Discord webhook URL
+  private static WEBHOOK_URL = 'https://discord.com/api/webhooks/1415554112375885894/KiO3b06OI1SpTFnArMDbjaCzs-182nKqiOk6n1_bFkHBL9mw4YgA_x5hAxXiwsy0pIAC';
 
   static async sendRequestToDiscord(request: Partial<DesignRequest>): Promise<boolean> {
     try {

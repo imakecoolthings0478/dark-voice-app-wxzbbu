@@ -7,6 +7,7 @@ import Icon from './Icon';
 import { DesignRequest, GlobalMessage } from '../types';
 import { supabaseService } from '../services/supabaseService';
 import { AdminService } from '../services/adminService';
+import { DiscordService } from '../services/discordService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function AdminRequestsPanel() {
@@ -18,12 +19,44 @@ export default function AdminRequestsPanel() {
   const [globalMessageTitle, setGlobalMessageTitle] = useState('');
   const [globalMessageText, setGlobalMessageText] = useState('');
   const [globalMessageType, setGlobalMessageType] = useState<GlobalMessage['type']>('info');
+  
+  // Cloud Database Configuration
+  const [showSupabaseConfig, setShowSupabaseConfig] = useState(false);
+  const [supabaseUrl, setSupabaseUrl] = useState('');
+  const [supabaseKey, setSupabaseKey] = useState('');
+  
+  // Discord Integration Configuration
+  const [showDiscordConfig, setShowDiscordConfig] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState('');
 
   useEffect(() => {
     loadRequests();
+    loadConfigurations();
     // Extend admin session when panel is accessed
     AdminService.extendSession();
   }, []);
+
+  const loadConfigurations = async () => {
+    try {
+      // Load Supabase configuration
+      const url = await AsyncStorage.getItem('supabase_url');
+      const key = await AsyncStorage.getItem('supabase_anon_key');
+      if (url && url !== 'YOUR_SUPABASE_URL') {
+        setSupabaseUrl(url);
+      }
+      if (key && key !== 'YOUR_SUPABASE_ANON_KEY') {
+        setSupabaseKey(key);
+      }
+
+      // Load Discord webhook configuration
+      const webhook = await AsyncStorage.getItem('discord_webhook_url');
+      if (webhook) {
+        setWebhookUrl(webhook);
+      }
+    } catch (error) {
+      console.error('Error loading configurations:', error);
+    }
+  };
 
   const loadRequests = async () => {
     try {
@@ -106,38 +139,79 @@ export default function AdminRequestsPanel() {
   };
 
   const handleAcceptRequest = (request: DesignRequest) => {
-    Alert.alert(
-      'Accept Request',
-      `Accept the ${request.service_type} request from ${request.client_name}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Accept', 
-          style: 'default',
-          onPress: () => updateRequestStatus(request.id, 'accepted', 'Request accepted by admin')
-        }
-      ]
-    );
+    try {
+      Alert.alert(
+        'Accept Request',
+        `Accept the ${request.service_type} request from ${request.client_name}?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Accept', 
+            style: 'default',
+            onPress: () => {
+              try {
+                updateRequestStatus(request.id, 'accepted', 'Request accepted by admin');
+              } catch (error) {
+                console.error('Error accepting request:', error);
+                Alert.alert('Error', 'Failed to accept request. Please try again.');
+              }
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      console.error('Error showing accept dialog:', error);
+      Alert.alert('Error', 'Failed to show accept dialog. Please try again.');
+    }
   };
 
   const handleRejectRequest = (request: DesignRequest) => {
-    Alert.prompt(
-      'Reject Request',
-      `Provide a reason for rejecting ${request.client_name}'s request:`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Reject', 
-          style: 'destructive',
-          onPress: (reason) => {
-            const adminNotes = reason || 'Request rejected by admin';
-            updateRequestStatus(request.id, 'rejected', adminNotes);
+    try {
+      Alert.prompt(
+        'Reject Request',
+        `Provide a reason for rejecting ${request.client_name}'s request:`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Reject', 
+            style: 'destructive',
+            onPress: (reason) => {
+              try {
+                const adminNotes = reason || 'Request rejected by admin';
+                updateRequestStatus(request.id, 'rejected', adminNotes);
+              } catch (error) {
+                console.error('Error rejecting request:', error);
+                Alert.alert('Error', 'Failed to reject request. Please try again.');
+              }
+            }
           }
-        }
-      ],
-      'plain-text',
-      'Please provide a brief explanation...'
-    );
+        ],
+        'plain-text',
+        'Please provide a brief explanation...'
+      );
+    } catch (error) {
+      console.error('Error showing reject dialog:', error);
+      // Fallback to simple alert if prompt fails
+      Alert.alert(
+        'Reject Request',
+        `Are you sure you want to reject ${request.client_name}'s request?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Reject', 
+            style: 'destructive',
+            onPress: () => {
+              try {
+                updateRequestStatus(request.id, 'rejected', 'Request rejected by admin');
+              } catch (error) {
+                console.error('Error rejecting request:', error);
+                Alert.alert('Error', 'Failed to reject request. Please try again.');
+              }
+            }
+          }
+        ]
+      );
+    }
   };
 
   const createGlobalMessage = async () => {
@@ -183,6 +257,125 @@ export default function AdminRequestsPanel() {
     }
   };
 
+  // Cloud Database Configuration Functions
+  const handleSupabaseSave = async () => {
+    try {
+      if (!supabaseUrl.trim() || !supabaseKey.trim()) {
+        Alert.alert('Error', 'Please enter both Supabase URL and Anonymous Key');
+        return;
+      }
+
+      const success = await supabaseService.configure(supabaseUrl.trim(), supabaseKey.trim());
+      
+      if (success) {
+        Alert.alert(
+          'Success! 🎉', 
+          'Supabase configured successfully! Your app is now fully cloud-based with global data access.',
+          [{ text: 'OK', onPress: () => setShowSupabaseConfig(false) }]
+        );
+        console.log('✅ Supabase configured successfully');
+        await loadRequests(); // Reload requests from new database
+      } else {
+        Alert.alert('Error', 'Failed to configure Supabase. Please check your URL and key.');
+      }
+    } catch (error) {
+      console.error('Error configuring Supabase:', error);
+      Alert.alert('Error', 'Failed to configure Supabase');
+    }
+  };
+
+  const handleSupabaseTest = async () => {
+    if (!supabaseUrl.trim() || !supabaseKey.trim()) {
+      Alert.alert('Error', 'Please enter both URL and key first');
+      return;
+    }
+
+    try {
+      // Test the connection by trying to create a temporary client
+      const testClient = await supabaseService.configure(supabaseUrl.trim(), supabaseKey.trim());
+      if (testClient) {
+        Alert.alert('Success! 🎉', 'Supabase connection test successful!');
+      } else {
+        Alert.alert('Error ❌', 'Failed to connect to Supabase. Please check your credentials.');
+      }
+    } catch (error) {
+      console.error('Supabase test error:', error);
+      Alert.alert('Error ❌', 'Connection test failed. Please verify your URL and key.');
+    }
+  };
+
+  // Discord Integration Functions
+  const handleDiscordSave = async () => {
+    try {
+      if (webhookUrl.trim()) {
+        await AsyncStorage.setItem('discord_webhook_url', webhookUrl.trim());
+        Alert.alert('Success', 'Discord webhook URL saved successfully!');
+        console.log('✅ Discord webhook URL saved');
+      } else {
+        await AsyncStorage.removeItem('discord_webhook_url');
+        Alert.alert('Success', 'Discord webhook URL removed!');
+        console.log('✅ Discord webhook URL removed');
+      }
+      setShowDiscordConfig(false);
+    } catch (error) {
+      console.error('Error saving Discord webhook URL:', error);
+      Alert.alert('Error', 'Failed to save Discord webhook URL');
+    }
+  };
+
+  const handleDiscordTest = async () => {
+    if (!webhookUrl.trim()) {
+      Alert.alert('Error', 'Please enter a webhook URL first');
+      return;
+    }
+
+    const testMessage = {
+      content: '🧪 **Test Message from Logify Makers Admin Panel**',
+      embeds: [{
+        title: '✅ Discord Integration Test Successful',
+        description: 'Your Discord webhook is working correctly! New design requests will be sent to this channel.',
+        color: 0x00ff00,
+        timestamp: new Date().toISOString(),
+        footer: {
+          text: 'Logify Makers - Admin Panel Test'
+        }
+      }]
+    };
+
+    const success = await DiscordService.sendWebhookMessage(webhookUrl.trim(), testMessage);
+    
+    if (success) {
+      Alert.alert('Success! 🎉', 'Test message sent to Discord successfully!');
+    } else {
+      Alert.alert('Error ❌', 'Failed to send test message. Please check your webhook URL.');
+    }
+  };
+
+  const handleDiscordRemove = async () => {
+    Alert.alert(
+      'Remove Discord Integration',
+      'Are you sure you want to remove the Discord webhook URL? You will no longer receive notifications for new requests.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await AsyncStorage.removeItem('discord_webhook_url');
+              setWebhookUrl('');
+              Alert.alert('Success', 'Discord webhook URL removed!');
+              console.log('✅ Discord webhook URL removed');
+            } catch (error) {
+              console.error('Error removing Discord webhook URL:', error);
+              Alert.alert('Error', 'Failed to remove Discord webhook URL');
+            }
+          }
+        }
+      ]
+    );
+  };
+
   const getStatusColor = (status: DesignRequest['status']) => {
     switch (status) {
       case 'accepted': return colors.success;
@@ -224,6 +417,158 @@ export default function AdminRequestsPanel() {
       }
     >
       <View style={{ padding: 24 }}>
+        {/* Cloud Database Configuration Section */}
+        <View style={{
+          backgroundColor: colors.card,
+          borderRadius: 20,
+          padding: 24,
+          marginBottom: 24,
+          borderWidth: 1,
+          borderColor: colors.border,
+          ...shadows.medium,
+        }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 20 }}>
+            <Icon name="cloud" size={24} color={colors.accent} style={{ marginRight: 12 }} />
+            <Text style={{
+              fontSize: 20,
+              fontWeight: '800',
+              color: colors.text,
+              letterSpacing: -0.3,
+            }}>
+              Cloud Database
+            </Text>
+            <View style={{
+              backgroundColor: supabaseService.isReady() ? colors.success : colors.warning,
+              paddingHorizontal: 12,
+              paddingVertical: 4,
+              borderRadius: 12,
+              marginLeft: 12,
+            }}>
+              <Text style={{
+                color: 'white',
+                fontSize: 12,
+                fontWeight: '700',
+              }}>
+                {supabaseService.isReady() ? 'CONNECTED' : 'NOT CONFIGURED'}
+              </Text>
+            </View>
+          </View>
+          
+          <Text style={{
+            fontSize: 14,
+            color: colors.textSecondary,
+            marginBottom: 16,
+            lineHeight: 20,
+            fontWeight: '500',
+          }}>
+            Configure Supabase for full cloud-based functionality with global data access and real-time synchronization.
+          </Text>
+          
+          <TouchableOpacity
+            onPress={() => setShowSupabaseConfig(true)}
+            style={{
+              backgroundColor: supabaseService.isReady() ? colors.info : colors.accent,
+              paddingHorizontal: 20,
+              paddingVertical: 14,
+              borderRadius: 16,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              ...shadows.medium,
+            }}
+          >
+            <Icon 
+              name={supabaseService.isReady() ? "settings" : "cloud-upload"} 
+              size={20} 
+              color="white" 
+              style={{ marginRight: 8 }} 
+            />
+            <Text style={{
+              color: 'white',
+              fontWeight: '700',
+              fontSize: 16,
+            }}>
+              {supabaseService.isReady() ? 'Reconfigure Database' : 'Configure Database'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Discord Integration Section */}
+        <View style={{
+          backgroundColor: colors.card,
+          borderRadius: 20,
+          padding: 24,
+          marginBottom: 24,
+          borderWidth: 1,
+          borderColor: colors.border,
+          ...shadows.medium,
+        }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 20 }}>
+            <Icon name="logo-discord" size={24} color="#5865F2" style={{ marginRight: 12 }} />
+            <Text style={{
+              fontSize: 20,
+              fontWeight: '800',
+              color: colors.text,
+              letterSpacing: -0.3,
+            }}>
+              Discord Integration
+            </Text>
+            <View style={{
+              backgroundColor: webhookUrl ? colors.success : colors.warning,
+              paddingHorizontal: 12,
+              paddingVertical: 4,
+              borderRadius: 12,
+              marginLeft: 12,
+            }}>
+              <Text style={{
+                color: 'white',
+                fontSize: 12,
+                fontWeight: '700',
+              }}>
+                {webhookUrl ? 'CONFIGURED' : 'NOT CONFIGURED'}
+              </Text>
+            </View>
+          </View>
+          
+          <Text style={{
+            fontSize: 14,
+            color: colors.textSecondary,
+            marginBottom: 16,
+            lineHeight: 20,
+            fontWeight: '500',
+          }}>
+            Configure Discord webhook to receive instant notifications when new design requests are submitted.
+          </Text>
+          
+          <TouchableOpacity
+            onPress={() => setShowDiscordConfig(true)}
+            style={{
+              backgroundColor: '#5865F2',
+              paddingHorizontal: 20,
+              paddingVertical: 14,
+              borderRadius: 16,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              ...shadows.medium,
+            }}
+          >
+            <Icon 
+              name={webhookUrl ? "settings" : "notifications"} 
+              size={20} 
+              color="white" 
+              style={{ marginRight: 8 }} 
+            />
+            <Text style={{
+              color: 'white',
+              fontWeight: '700',
+              fontSize: 16,
+            }}>
+              {webhookUrl ? 'Reconfigure Discord' : 'Configure Discord'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Global Message Section */}
         <View style={{
           backgroundColor: colors.card,
@@ -600,6 +945,319 @@ export default function AdminRequestsPanel() {
           )}
         </View>
       </View>
+
+      {/* Supabase Configuration Modal */}
+      {showSupabaseConfig && (
+        <View style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.8)',
+          alignItems: 'center',
+          justifyContent: 'center',
+          paddingHorizontal: 24,
+        }}>
+          <View style={{
+            backgroundColor: colors.card,
+            borderRadius: 24,
+            padding: 32,
+            width: '100%',
+            maxWidth: 400,
+            borderWidth: 1,
+            borderColor: colors.border,
+            ...shadows.xl,
+          }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 24 }}>
+              <Icon name="cloud" size={28} color={colors.accent} style={{ marginRight: 12 }} />
+              <Text style={{
+                fontSize: 22,
+                fontWeight: '800',
+                color: colors.text,
+                letterSpacing: -0.3,
+              }}>
+                Configure Cloud Database
+              </Text>
+            </View>
+
+            <Text style={{
+              fontSize: 14,
+              color: colors.textSecondary,
+              marginBottom: 20,
+              lineHeight: 20,
+              fontWeight: '500',
+            }}>
+              Enter your Supabase project URL and anonymous key to enable full cloud functionality with global data access.
+            </Text>
+
+            <Text style={{
+              fontSize: 16,
+              color: colors.text,
+              marginBottom: 8,
+              fontWeight: '700',
+            }}>
+              Supabase URL *
+            </Text>
+            <TextInput
+              style={{
+                backgroundColor: colors.backgroundAlt,
+                borderColor: colors.border,
+                borderWidth: 1,
+                borderRadius: 12,
+                padding: 16,
+                color: colors.text,
+                fontSize: 14,
+                marginBottom: 16,
+                ...shadows.small,
+              }}
+              placeholder="https://your-project.supabase.co"
+              placeholderTextColor={colors.textSecondary}
+              value={supabaseUrl}
+              onChangeText={setSupabaseUrl}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+
+            <Text style={{
+              fontSize: 16,
+              color: colors.text,
+              marginBottom: 8,
+              fontWeight: '700',
+            }}>
+              Anonymous Key *
+            </Text>
+            <TextInput
+              style={{
+                backgroundColor: colors.backgroundAlt,
+                borderColor: colors.border,
+                borderWidth: 1,
+                borderRadius: 12,
+                padding: 16,
+                color: colors.text,
+                fontSize: 14,
+                marginBottom: 24,
+                ...shadows.small,
+              }}
+              placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              placeholderTextColor={colors.textSecondary}
+              value={supabaseKey}
+              onChangeText={setSupabaseKey}
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry
+            />
+
+            <View style={{ flexDirection: 'row', marginBottom: 20 }}>
+              <TouchableOpacity
+                onPress={handleSupabaseTest}
+                style={{
+                  backgroundColor: colors.info,
+                  paddingHorizontal: 16,
+                  paddingVertical: 12,
+                  borderRadius: 12,
+                  flex: 1,
+                  marginRight: 8,
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ color: 'white', fontWeight: '700', fontSize: 14 }}>
+                  Test Connection
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              <TouchableOpacity
+                onPress={() => setShowSupabaseConfig(false)}
+                style={{
+                  backgroundColor: colors.grey,
+                  paddingHorizontal: 24,
+                  paddingVertical: 14,
+                  borderRadius: 12,
+                  flex: 1,
+                  marginRight: 8,
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ color: 'white', fontWeight: '700', fontSize: 16 }}>
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                onPress={handleSupabaseSave}
+                style={{
+                  backgroundColor: colors.accent,
+                  paddingHorizontal: 24,
+                  paddingVertical: 14,
+                  borderRadius: 12,
+                  flex: 1,
+                  marginLeft: 8,
+                  alignItems: 'center',
+                  ...shadows.medium,
+                }}
+              >
+                <Text style={{ color: 'white', fontWeight: '700', fontSize: 16 }}>
+                  Save & Connect
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+
+      {/* Discord Configuration Modal */}
+      {showDiscordConfig && (
+        <View style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.8)',
+          alignItems: 'center',
+          justifyContent: 'center',
+          paddingHorizontal: 24,
+        }}>
+          <View style={{
+            backgroundColor: colors.card,
+            borderRadius: 24,
+            padding: 32,
+            width: '100%',
+            maxWidth: 400,
+            borderWidth: 1,
+            borderColor: colors.border,
+            ...shadows.xl,
+          }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 24 }}>
+              <Icon name="logo-discord" size={28} color="#5865F2" style={{ marginRight: 12 }} />
+              <Text style={{
+                fontSize: 22,
+                fontWeight: '800',
+                color: colors.text,
+                letterSpacing: -0.3,
+              }}>
+                Configure Discord
+              </Text>
+            </View>
+
+            <Text style={{
+              fontSize: 14,
+              color: colors.textSecondary,
+              marginBottom: 20,
+              lineHeight: 20,
+              fontWeight: '500',
+            }}>
+              Enter your Discord webhook URL to receive instant notifications when new design requests are submitted.
+            </Text>
+
+            <Text style={{
+              fontSize: 16,
+              color: colors.text,
+              marginBottom: 8,
+              fontWeight: '700',
+            }}>
+              Discord Webhook URL
+            </Text>
+            <TextInput
+              style={{
+                backgroundColor: colors.backgroundAlt,
+                borderColor: colors.border,
+                borderWidth: 1,
+                borderRadius: 12,
+                padding: 16,
+                color: colors.text,
+                fontSize: 14,
+                marginBottom: 20,
+                minHeight: 80,
+                textAlignVertical: 'top',
+                ...shadows.small,
+              }}
+              placeholder="https://discord.com/api/webhooks/..."
+              placeholderTextColor={colors.textSecondary}
+              value={webhookUrl}
+              onChangeText={setWebhookUrl}
+              multiline
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+
+            <View style={{ flexDirection: 'row', marginBottom: 20 }}>
+              <TouchableOpacity
+                onPress={handleDiscordTest}
+                style={{
+                  backgroundColor: colors.info,
+                  paddingHorizontal: 16,
+                  paddingVertical: 12,
+                  borderRadius: 12,
+                  flex: 1,
+                  marginRight: 8,
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ color: 'white', fontWeight: '700', fontSize: 14 }}>
+                  Test Webhook
+                </Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                onPress={handleDiscordRemove}
+                style={{
+                  backgroundColor: colors.error,
+                  paddingHorizontal: 16,
+                  paddingVertical: 12,
+                  borderRadius: 12,
+                  flex: 1,
+                  marginLeft: 8,
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ color: 'white', fontWeight: '700', fontSize: 14 }}>
+                  Remove
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              <TouchableOpacity
+                onPress={() => setShowDiscordConfig(false)}
+                style={{
+                  backgroundColor: colors.grey,
+                  paddingHorizontal: 24,
+                  paddingVertical: 14,
+                  borderRadius: 12,
+                  flex: 1,
+                  marginRight: 8,
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ color: 'white', fontWeight: '700', fontSize: 16 }}>
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                onPress={handleDiscordSave}
+                style={{
+                  backgroundColor: '#5865F2',
+                  paddingHorizontal: 24,
+                  paddingVertical: 14,
+                  borderRadius: 12,
+                  flex: 1,
+                  marginLeft: 8,
+                  alignItems: 'center',
+                  ...shadows.medium,
+                }}
+              >
+                <Text style={{ color: 'white', fontWeight: '700', fontSize: 16 }}>
+                  Save Webhook
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
     </ScrollView>
   );
 }

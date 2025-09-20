@@ -1,28 +1,82 @@
 
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { DesignRequest, GlobalMessage } from '../types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Note: These would be set from environment variables in a real app
-const SUPABASE_URL = 'YOUR_SUPABASE_URL';
-const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+// Actual Supabase credentials for the project
+const DEFAULT_SUPABASE_URL = 'https://phwtkkwwfpbgwcvwgick.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBod3Rra3d3ZnBiZ3djdndnaWNrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgzNjIzMTQsImV4cCI6MjA3MzkzODMxNH0.PLfuzR4Bfbya0G5W-Hql6jMTDWr_4gt-M_SWa4S-4b8';
 
 class SupabaseService {
-  private supabase;
+  private supabase: SupabaseClient | null = null;
   private isConfigured = false;
 
   constructor() {
-    // Initialize with placeholder values - user needs to configure
-    this.supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    // Don't initialize here - wait for proper configuration
+  }
+
+  async initialize(): Promise<boolean> {
+    try {
+      // Try to load custom configuration first
+      const customUrl = await AsyncStorage.getItem('supabase_url');
+      const customKey = await AsyncStorage.getItem('supabase_anon_key');
+      
+      let url = DEFAULT_SUPABASE_URL;
+      let anonKey = DEFAULT_SUPABASE_ANON_KEY;
+      
+      // Use custom configuration if available and valid
+      if (customUrl && customKey && customUrl.startsWith('http') && customUrl !== 'YOUR_SUPABASE_URL') {
+        url = customUrl;
+        anonKey = customKey;
+        console.log('✅ Using custom Supabase configuration');
+      } else {
+        console.log('✅ Using default Supabase configuration');
+      }
+
+      // Validate URL format
+      if (!url.startsWith('http')) {
+        throw new Error('Invalid Supabase URL format');
+      }
+
+      this.supabase = createClient(url, anonKey, {
+        auth: {
+          storage: AsyncStorage,
+          autoRefreshToken: true,
+          persistSession: true,
+          detectSessionInUrl: false,
+        },
+      });
+      
+      this.isConfigured = true;
+      console.log('✅ Supabase client initialized successfully');
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to initialize Supabase:', error);
+      this.isConfigured = false;
+      return false;
+    }
   }
 
   async configure(url: string, anonKey: string): Promise<boolean> {
     try {
-      this.supabase = createClient(url, anonKey);
+      // Validate URL format
+      if (!url.startsWith('http')) {
+        throw new Error('Invalid URL format - must start with http or https');
+      }
+
+      this.supabase = createClient(url, anonKey, {
+        auth: {
+          storage: AsyncStorage,
+          autoRefreshToken: true,
+          persistSession: true,
+          detectSessionInUrl: false,
+        },
+      });
+      
       this.isConfigured = true;
       await AsyncStorage.setItem('supabase_url', url);
       await AsyncStorage.setItem('supabase_anon_key', anonKey);
-      console.log('✅ Supabase configured successfully');
+      console.log('✅ Supabase configured successfully with custom settings');
       return true;
     } catch (error) {
       console.error('❌ Failed to configure Supabase:', error);
@@ -31,34 +85,28 @@ class SupabaseService {
   }
 
   async loadConfiguration(): Promise<boolean> {
-    try {
-      const url = await AsyncStorage.getItem('supabase_url');
-      const anonKey = await AsyncStorage.getItem('supabase_anon_key');
-      
-      if (url && anonKey && url !== 'YOUR_SUPABASE_URL') {
-        this.supabase = createClient(url, anonKey);
-        this.isConfigured = true;
-        return true;
-      }
-      return false;
-    } catch (error) {
-      console.error('Error loading Supabase configuration:', error);
-      return false;
-    }
+    return await this.initialize();
   }
 
   isReady(): boolean {
-    return this.isConfigured;
+    return this.isConfigured && this.supabase !== null;
+  }
+
+  getClient(): SupabaseClient {
+    if (!this.supabase) {
+      throw new Error('Supabase client not initialized. Call initialize() first.');
+    }
+    return this.supabase;
   }
 
   // Design Requests
   async createRequest(request: DesignRequest): Promise<{ success: boolean; error?: string }> {
-    if (!this.isConfigured) {
+    if (!this.isReady()) {
       return { success: false, error: 'Supabase not configured' };
     }
 
     try {
-      const { error } = await this.supabase
+      const { error } = await this.supabase!
         .from('design_requests')
         .insert([request]);
 
@@ -76,12 +124,12 @@ class SupabaseService {
   }
 
   async getRequests(): Promise<{ success: boolean; data?: DesignRequest[]; error?: string }> {
-    if (!this.isConfigured) {
+    if (!this.isReady()) {
       return { success: false, error: 'Supabase not configured' };
     }
 
     try {
-      const { data, error } = await this.supabase
+      const { data, error } = await this.supabase!
         .from('design_requests')
         .select('*')
         .order('created_at', { ascending: false });
@@ -103,7 +151,7 @@ class SupabaseService {
     status: DesignRequest['status'], 
     adminNotes?: string
   ): Promise<{ success: boolean; error?: string }> {
-    if (!this.isConfigured) {
+    if (!this.isReady()) {
       return { success: false, error: 'Supabase not configured' };
     }
 
@@ -117,7 +165,7 @@ class SupabaseService {
         updateData.admin_notes = adminNotes;
       }
 
-      const { error } = await this.supabase
+      const { error } = await this.supabase!
         .from('design_requests')
         .update(updateData)
         .eq('id', requestId);
@@ -137,12 +185,12 @@ class SupabaseService {
 
   // Global Messages
   async getGlobalMessages(): Promise<{ success: boolean; data?: GlobalMessage[]; error?: string }> {
-    if (!this.isConfigured) {
+    if (!this.isReady()) {
       return { success: false, error: 'Supabase not configured' };
     }
 
     try {
-      const { data, error } = await this.supabase
+      const { data, error } = await this.supabase!
         .from('global_messages')
         .select('*')
         .eq('is_active', true)
@@ -167,12 +215,12 @@ class SupabaseService {
   }
 
   async createGlobalMessage(message: GlobalMessage): Promise<{ success: boolean; error?: string }> {
-    if (!this.isConfigured) {
+    if (!this.isReady()) {
       return { success: false, error: 'Supabase not configured' };
     }
 
     try {
-      const { error } = await this.supabase
+      const { error } = await this.supabase!
         .from('global_messages')
         .insert([message]);
 
@@ -190,12 +238,12 @@ class SupabaseService {
   }
 
   async deactivateGlobalMessage(messageId: string): Promise<{ success: boolean; error?: string }> {
-    if (!this.isConfigured) {
+    if (!this.isReady()) {
       return { success: false, error: 'Supabase not configured' };
     }
 
     try {
-      const { error } = await this.supabase
+      const { error } = await this.supabase!
         .from('global_messages')
         .update({ is_active: false })
         .eq('id', messageId);

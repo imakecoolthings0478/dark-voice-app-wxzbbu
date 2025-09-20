@@ -50,37 +50,64 @@ export default function LogifyMakersApp() {
     try {
       console.log('🚀 Initializing Logify Makers App...');
       
-      // Check internet connection first
+      // Check internet connection first with improved detection
       const connected = await NetworkService.checkInternetConnection();
+      console.log('Internet connection status:', connected);
       setIsConnected(connected);
       
       if (!connected) {
-        console.log('❌ No internet connection detected');
+        console.log('❌ No internet connection detected - app requires internet for cloud-based functionality');
         setCheckingConnection(false);
+        
+        // Set up network listener to detect when connection is restored
+        const unsubscribe = NetworkService.subscribeToNetworkChanges((isConnected) => {
+          console.log('Network status changed:', isConnected);
+          setIsConnected(isConnected);
+          if (isConnected) {
+            console.log('✅ Internet connection restored, reinitializing app...');
+            initializeApp();
+            unsubscribe();
+          }
+        });
+        
         return;
       }
 
       console.log('✅ Internet connection verified');
       
-      // Load Supabase configuration
-      const supabaseConfigured = await supabaseService.loadConfiguration();
+      // Initialize Supabase with proper configuration
+      const supabaseConfigured = await supabaseService.initialize();
       setIsSupabaseConfigured(supabaseConfigured);
       
       if (supabaseConfigured) {
-        console.log('✅ Supabase configured and ready');
+        console.log('✅ Supabase configured and ready - app is fully cloud-based');
         
         // Sync any local data to cloud
         await syncLocalDataToCloud();
       } else {
-        console.log('⚠️ Supabase not configured - app will work with local storage only');
+        console.log('⚠️ Supabase initialization failed - configure in admin panel for full cloud functionality');
       }
       
       // Load order status from cloud or local storage
       await loadOrderStatus();
       
-      console.log('✅ App initialization complete');
+      // Set up continuous network monitoring
+      NetworkService.subscribeToNetworkChanges((isConnected) => {
+        console.log('Network status changed during app usage:', isConnected);
+        setIsConnected(isConnected);
+        if (!isConnected) {
+          console.log('❌ Internet connection lost - showing no internet screen');
+        } else {
+          console.log('✅ Internet connection restored');
+        }
+      });
+      
+      console.log('✅ App initialization complete - fully cloud-based and online');
     } catch (error) {
       console.error('❌ Error initializing app:', error);
+      // Even on error, check if we lost internet connection
+      const stillConnected = await NetworkService.checkInternetConnection();
+      setIsConnected(stillConnected);
     } finally {
       setCheckingConnection(false);
     }
@@ -88,7 +115,7 @@ export default function LogifyMakersApp() {
 
   useEffect(() => {
     initializeApp();
-  }, [initializeApp]);
+  }, []);
 
   const syncLocalDataToCloud = async () => {
     if (!supabaseService.isReady()) return;

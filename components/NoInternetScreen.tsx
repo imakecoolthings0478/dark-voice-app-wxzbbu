@@ -3,7 +3,7 @@ import React from 'react';
 import Icon from './Icon';
 import { shadows } from '../styles/commonStyles';
 import { NetworkService } from '../services/networkService';
-import { View, Text, TouchableOpacity } from 'react-native';
+import { View, Text, TouchableOpacity, Alert } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 
 interface NoInternetScreenProps {
@@ -15,12 +15,21 @@ export default function NoInternetScreen({ onRetry }: NoInternetScreenProps) {
 
   const handleRetry = async () => {
     console.log('Retrying internet connection...');
+    
+    // Show loading state briefly
     const isConnected = await NetworkService.checkInternetConnection();
+    
     if (isConnected) {
       console.log('✅ Internet connection restored');
       onRetry();
     } else {
       console.log('❌ Still no internet connection');
+      // Provide user feedback that connection is still not available
+      Alert.alert(
+        'Still No Connection',
+        'Internet connection is still not available. Please check your WiFi or mobile data and try again.',
+        [{ text: 'OK', style: 'default' }]
+      );
     }
   };
 

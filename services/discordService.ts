@@ -4,15 +4,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface DiscordWebhookPayload {
   content?: string;
-  embeds?: Array<{
+  embeds?: {
     title?: string;
     description?: string;
     color?: number;
-    fields?: Array<{
+    fields?: {
       name: string;
       value: string;
       inline?: boolean;
-    }>;
+    }[];
     timestamp?: string;
     footer?: {
       text: string;
@@ -20,7 +20,7 @@ interface DiscordWebhookPayload {
     thumbnail?: {
       url: string;
     };
-  }>;
+  }[];
 }
 
 export class DiscordService {
@@ -330,6 +330,31 @@ export class DiscordService {
         success: false,
         message: error instanceof Error ? error.message : 'Unknown error',
       };
+    }
+  }
+
+  static async sendWebhookMessage(webhookUrl: string, payload: DiscordWebhookPayload): Promise<boolean> {
+    try {
+      const response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'LogifyMakers/2.0',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Discord webhook failed:', response.status, response.statusText, errorText);
+        return false;
+      }
+
+      console.log('✅ Message sent to Discord successfully');
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to send message to Discord:', error);
+      return false;
     }
   }
 }

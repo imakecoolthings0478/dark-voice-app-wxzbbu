@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, Animated } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import { shadows } from '../styles/commonStyles';
@@ -20,6 +20,61 @@ export default function GlobalMessageBanner({ onMessageDismissed }: GlobalMessag
   const [slideAnim] = useState(new Animated.Value(-100));
   const [dismissedMessages, setDismissedMessages] = useState<string[]>([]);
 
+  const loadGlobalMessages = useCallback(async () => {
+    try {
+      const result = await supabaseService.getGlobalMessages();
+      if (result.success && result.data) {
+        setMessages(result.data);
+        console.log('Loaded global messages:', result.data.length);
+      }
+    } catch (error) {
+      console.error('Error loading global messages:', error);
+    }
+  }, []);
+
+  const loadDismissedMessages = useCallback(async () => {
+    try {
+      const dismissed = await AsyncStorage.getItem('dismissed_global_messages');
+      if (dismissed) {
+        setDismissedMessages(JSON.parse(dismissed));
+      }
+    } catch (error) {
+      console.error('Error loading dismissed messages:', error);
+    }
+  }, []);
+
+  const saveDismissedMessages = async (dismissed: string[]) => {
+    try {
+      await AsyncStorage.setItem('dismissed_global_messages', JSON.stringify(dismissed));
+    } catch (error) {
+      console.error('Error saving dismissed messages:', error);
+    }
+  };
+
+  const isMessageDismissed = useCallback((message: GlobalMessage): boolean => {
+    return dismissedMessages.includes(message.id);
+  }, [dismissedMessages]);
+
+  const showMessage = useCallback(() => {
+    setIsVisible(true);
+    Animated.spring(slideAnim, {
+      toValue: 0,
+      useNativeDriver: true,
+      tension: 100,
+      friction: 8,
+    }).start();
+  }, [slideAnim]);
+
+  const hideMessage = useCallback(() => {
+    Animated.timing(slideAnim, {
+      toValue: -100,
+      duration: 300,
+      useNativeDriver: true,
+    }).start(() => {
+      setIsVisible(false);
+    });
+  }, [slideAnim]);
+
   useEffect(() => {
     loadGlobalMessages();
     loadDismissedMessages();
@@ -28,7 +83,7 @@ export default function GlobalMessageBanner({ onMessageDismissed }: GlobalMessag
     const interval = setInterval(loadGlobalMessages, 30000);
     
     return () => clearInterval(interval);
-  }, []);
+  }, [loadGlobalMessages, loadDismissedMessages]);
 
   useEffect(() => {
     if (messages.length > 0 && !isMessageDismissed(messages[currentMessageIndex])) {
@@ -42,62 +97,7 @@ export default function GlobalMessageBanner({ onMessageDismissed }: GlobalMessag
         hideMessage();
       }
     }
-  }, [messages, currentMessageIndex, dismissedMessages]);
-
-  const loadGlobalMessages = async () => {
-    try {
-      const result = await supabaseService.getGlobalMessages();
-      if (result.success && result.data) {
-        setMessages(result.data);
-        console.log('Loaded global messages:', result.data.length);
-      }
-    } catch (error) {
-      console.error('Error loading global messages:', error);
-    }
-  };
-
-  const loadDismissedMessages = async () => {
-    try {
-      const dismissed = await AsyncStorage.getItem('dismissed_global_messages');
-      if (dismissed) {
-        setDismissedMessages(JSON.parse(dismissed));
-      }
-    } catch (error) {
-      console.error('Error loading dismissed messages:', error);
-    }
-  };
-
-  const saveDismissedMessages = async (dismissed: string[]) => {
-    try {
-      await AsyncStorage.setItem('dismissed_global_messages', JSON.stringify(dismissed));
-    } catch (error) {
-      console.error('Error saving dismissed messages:', error);
-    }
-  };
-
-  const isMessageDismissed = (message: GlobalMessage): boolean => {
-    return dismissedMessages.includes(message.id);
-  };
-
-  const showMessage = () => {
-    setIsVisible(true);
-    Animated.spring(slideAnim, {
-      toValue: 0,
-      useNativeDriver: true,
-      tension: 100,
-      friction: 8,
-    }).start();
-  };
-
-  const hideMessage = () => {
-    Animated.timing(slideAnim, {
-      toValue: -100,
-      duration: 300,
-      useNativeDriver: true,
-    }).start(() => {
-      setIsVisible(false);
-    });
-  };
+  }, [messages, currentMessageIndex, isMessageDismissed, showMessage, hideMessage]);
 
   const dismissMessage = async () => {
     const currentMessage = messages[currentMessageIndex];

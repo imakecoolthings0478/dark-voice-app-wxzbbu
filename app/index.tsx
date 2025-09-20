@@ -1,6 +1,6 @@
 
 import { Text, View, TextInput, ScrollView, TouchableOpacity, Alert, Linking } from 'react-native';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useTheme } from '../contexts/ThemeContext';
 import { shadows } from '../styles/commonStyles';
 import Button from '../components/Button';
@@ -46,11 +46,7 @@ export default function LogifyMakersApp() {
     { name: 'Custom Design', icon: 'create-outline', color: colors.professional.pink, gradient: ['#ec4899', '#db2777'] }
   ];
 
-  useEffect(() => {
-    initializeApp();
-  }, []);
-
-  const initializeApp = async () => {
+  const initializeApp = useCallback(async () => {
     try {
       console.log('🚀 Initializing Logify Makers App...');
       
@@ -88,7 +84,11 @@ export default function LogifyMakersApp() {
     } finally {
       setCheckingConnection(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    initializeApp();
+  }, [initializeApp]);
 
   const syncLocalDataToCloud = async () => {
     if (!supabaseService.isReady()) return;

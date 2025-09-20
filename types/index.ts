@@ -43,3 +43,12 @@ export interface AdminSession {
   loginTime: string;
   expiresAt: string;
 }
+
+export interface OrderStatus {
+  id: string;
+  accepting_orders: boolean;
+  updated_by?: string;
+  updated_at: string;
+  message?: string;
+  created_at: string;
+}

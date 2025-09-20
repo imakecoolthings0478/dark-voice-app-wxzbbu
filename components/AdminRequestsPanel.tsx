@@ -4,13 +4,18 @@ import { View, Text, ScrollView, TouchableOpacity, Alert, TextInput, RefreshCont
 import { useTheme } from '../contexts/ThemeContext';
 import { shadows } from '../styles/commonStyles';
 import Icon from './Icon';
-import { DesignRequest, GlobalMessage } from '../types';
+import { DesignRequest, GlobalMessage, OrderStatus } from '../types';
 import { supabaseService } from '../services/supabaseService';
 import { AdminService } from '../services/adminService';
 import { DiscordService } from '../services/discordService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export default function AdminRequestsPanel() {
+interface AdminRequestsPanelProps {
+  orderAcceptStatus?: boolean;
+  onToggleOrderStatus?: () => void;
+}
+
+export default function AdminRequestsPanel({ orderAcceptStatus, onToggleOrderStatus }: AdminRequestsPanelProps) {
   const { colors } = useTheme();
   const [requests, setRequests] = useState<DesignRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -19,6 +24,10 @@ export default function AdminRequestsPanel() {
   const [globalMessageTitle, setGlobalMessageTitle] = useState('');
   const [globalMessageText, setGlobalMessageText] = useState('');
   const [globalMessageType, setGlobalMessageType] = useState<GlobalMessage['type']>('info');
+  
+  // Order Status Management
+  const [orderStatus, setOrderStatus] = useState<OrderStatus | null>(null);
+  const [orderStatusMessage, setOrderStatusMessage] = useState('');
   
   // Cloud Database Configuration
   const [showSupabaseConfig, setShowSupabaseConfig] = useState(false);
@@ -32,6 +41,7 @@ export default function AdminRequestsPanel() {
   useEffect(() => {
     loadRequests();
     loadConfigurations();
+    loadOrderStatus();
     // Extend admin session when panel is accessed
     AdminService.extendSession();
   }, []);
@@ -55,6 +65,36 @@ export default function AdminRequestsPanel() {
       }
     } catch (error) {
       console.error('Error loading configurations:', error);
+    }
+  };
+
+  const loadOrderStatus = async () => {
+    try {
+      if (supabaseService.isReady()) {
+        const result = await supabaseService.getOrderStatus();
+        if (result.success && result.data) {
+          setOrderStatus(result.data);
+          setOrderStatusMessage(result.data.message || '');
+          console.log('✅ Order status loaded from cloud');
+          return;
+        }
+      }
+      
+      // Fallback to local storage
+      const status = await AsyncStorage.getItem('order_accept_status');
+      if (status !== null) {
+        const accepting = JSON.parse(status);
+        setOrderStatus({
+          id: 'local',
+          accepting_orders: accepting,
+          updated_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+          message: accepting ? 'We are currently accepting new design requests!' : 'We have temporarily closed new orders.'
+        });
+        console.log('✅ Order status loaded from local storage');
+      }
+    } catch (error) {
+      console.error('Error loading order status:', error);
     }
   };
 
@@ -90,7 +130,79 @@ export default function AdminRequestsPanel() {
   const onRefresh = async () => {
     setRefreshing(true);
     await loadRequests();
+    await loadOrderStatus();
     setRefreshing(false);
+  };
+
+  const handleToggleOrderStatus = async () => {
+    // Use parent callback if available, otherwise handle locally
+    if (onToggleOrderStatus) {
+      onToggleOrderStatus();
+      return;
+    }
+
+    if (!orderStatus) return;
+
+    const newStatus = !orderStatus.accepting_orders;
+    const message = orderStatusMessage.trim() || (newStatus 
+      ? 'We are now accepting new design requests!' 
+      : 'We have temporarily closed new orders.');
+
+    try {
+      // Update in cloud if available
+      if (supabaseService.isReady()) {
+        const result = await supabaseService.updateOrderStatus(newStatus, 'Admin', message);
+        if (result.success) {
+          console.log('✅ Order status updated in cloud');
+          await loadOrderStatus(); // Reload from cloud
+        } else {
+          throw new Error(result.error);
+        }
+      } else {
+        // Update locally
+        await AsyncStorage.setItem('order_accept_status', JSON.stringify(newStatus));
+        setOrderStatus({
+          ...orderStatus,
+          accepting_orders: newStatus,
+          updated_at: new Date().toISOString(),
+          message: message
+        });
+      }
+
+      // Send Discord notification
+      const webhookUrl = await AsyncStorage.getItem('discord_webhook_url');
+      if (webhookUrl) {
+        const discordMessage = {
+          content: `🔄 **Order Status Changed**`,
+          embeds: [{
+            title: newStatus ? '✅ Orders Now Open' : '⏸️ Orders Temporarily Closed',
+            description: message,
+            color: newStatus ? 0x00ff00 : 0xff9900,
+            timestamp: new Date().toISOString(),
+            footer: {
+              text: 'Logify Makers - Admin Panel'
+            }
+          }]
+        };
+
+        await DiscordService.sendWebhookMessage(webhookUrl, discordMessage);
+      }
+
+      Alert.alert(
+        'Order Status Updated! ✅',
+        `Orders are now ${newStatus ? 'OPEN' : 'CLOSED'}\n\nMessage: "${message}"${webhookUrl ? '\n\nDiscord notification sent!' : ''}`,
+        [{ text: 'OK', style: 'default' }]
+      );
+
+      setOrderStatusMessage(''); // Clear custom message after use
+    } catch (error) {
+      console.error('Error updating order status:', error);
+      Alert.alert(
+        'Error ❌',
+        `Failed to update order status: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        [{ text: 'OK', style: 'default' }]
+      );
+    }
   };
 
   const updateRequestStatus = async (
@@ -457,6 +569,147 @@ export default function AdminRequestsPanel() {
       }
     >
       <View style={{ padding: 24 }}>
+        {/* Order Status Control Section */}
+        <View style={{
+          backgroundColor: colors.card,
+          borderRadius: 20,
+          padding: 24,
+          marginBottom: 24,
+          borderWidth: 1,
+          borderColor: colors.border,
+          ...shadows.medium,
+        }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 20 }}>
+            <Icon name="toggle" size={24} color={colors.accent} style={{ marginRight: 12 }} />
+            <Text style={{
+              fontSize: 20,
+              fontWeight: '800',
+              color: colors.text,
+              letterSpacing: -0.3,
+            }}>
+              Global Order Status
+            </Text>
+            <View style={{
+              backgroundColor: (orderAcceptStatus !== undefined ? orderAcceptStatus : orderStatus?.accepting_orders) ? colors.success : colors.error,
+              paddingHorizontal: 12,
+              paddingVertical: 4,
+              borderRadius: 12,
+              marginLeft: 12,
+            }}>
+              <Text style={{
+                color: 'white',
+                fontSize: 12,
+                fontWeight: '700',
+              }}>
+                {(orderAcceptStatus !== undefined ? orderAcceptStatus : orderStatus?.accepting_orders) ? 'ACCEPTING' : 'CLOSED'}
+              </Text>
+            </View>
+          </View>
+          
+          <Text style={{
+            fontSize: 14,
+            color: colors.textSecondary,
+            marginBottom: 16,
+            lineHeight: 20,
+            fontWeight: '500',
+          }}>
+            Control whether the app accepts new design requests globally. This setting affects all users.
+          </Text>
+
+          {/* Current Status Display */}
+          <View style={{
+            backgroundColor: colors.backgroundAlt,
+            padding: 16,
+            borderRadius: 12,
+            marginBottom: 16,
+            borderLeftWidth: 4,
+            borderLeftColor: (orderAcceptStatus !== undefined ? orderAcceptStatus : orderStatus?.accepting_orders) ? colors.success : colors.error,
+          }}>
+            <Text style={{
+              fontSize: 14,
+              color: colors.text,
+              fontWeight: '600',
+              marginBottom: 4,
+            }}>
+              Current Status: {(orderAcceptStatus !== undefined ? orderAcceptStatus : orderStatus?.accepting_orders) ? 'Accepting Orders' : 'Orders Closed'}
+            </Text>
+            <Text style={{
+              fontSize: 12,
+              color: colors.textSecondary,
+              marginBottom: 8,
+            }}>
+              Last updated: {orderStatus?.updated_at ? new Date(orderStatus.updated_at).toLocaleString() : 'Unknown'}
+            </Text>
+            {orderStatus?.message && (
+              <Text style={{
+                fontSize: 13,
+                color: colors.text,
+                fontStyle: 'italic',
+              }}>
+                "{orderStatus.message}"
+              </Text>
+            )}
+          </View>
+
+          {/* Custom Message Input */}
+          <Text style={{
+            fontSize: 16,
+            color: colors.text,
+            marginBottom: 8,
+            fontWeight: '700',
+          }}>
+            Custom Status Message (Optional)
+          </Text>
+          <TextInput
+            style={{
+              backgroundColor: colors.backgroundAlt,
+              borderColor: colors.border,
+              borderWidth: 1,
+              borderRadius: 12,
+              padding: 16,
+              color: colors.text,
+              fontSize: 14,
+              marginBottom: 20,
+              minHeight: 80,
+              textAlignVertical: 'top',
+              ...shadows.small,
+            }}
+            placeholder="Enter a custom message for the status change (will be sent to Discord)..."
+            placeholderTextColor={colors.textSecondary}
+            value={orderStatusMessage}
+            onChangeText={setOrderStatusMessage}
+            multiline
+          />
+          
+          <TouchableOpacity
+            onPress={handleToggleOrderStatus}
+            style={{
+              backgroundColor: (orderAcceptStatus !== undefined ? orderAcceptStatus : orderStatus?.accepting_orders) ? colors.error : colors.success,
+              paddingHorizontal: 20,
+              paddingVertical: 14,
+              borderRadius: 16,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              ...shadows.medium,
+            }}
+          >
+            <Icon 
+              name={(orderAcceptStatus !== undefined ? orderAcceptStatus : orderStatus?.accepting_orders) ? "close-circle" : "checkmark-circle"} 
+              size={20} 
+              color="white" 
+              style={{ marginRight: 8 }} 
+            />
+            <Text style={{
+              color: 'white',
+              fontWeight: '700',
+              fontSize: 16,
+            }}>
+              {(orderAcceptStatus !== undefined ? orderAcceptStatus : orderStatus?.accepting_orders) ? 'Close Orders Globally' : 'Open Orders Globally'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Cloud Database Configuration Section */}
         <View style={{
           backgroundColor: colors.card,

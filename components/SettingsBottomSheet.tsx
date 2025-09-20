@@ -13,9 +13,11 @@ import { useTheme } from '../contexts/ThemeContext';
 interface SettingsBottomSheetProps {
   visible: boolean;
   onClose: () => void;
+  orderAcceptStatus: boolean;
+  onToggleOrderStatus: () => void;
 }
 
-export default function SettingsBottomSheet({ visible, onClose }: SettingsBottomSheetProps) {
+export default function SettingsBottomSheet({ visible, onClose, orderAcceptStatus, onToggleOrderStatus }: SettingsBottomSheetProps) {
   const { theme, toggleTheme, colors } = useTheme();
   const [showAdminAuth, setShowAdminAuth] = useState(false);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
@@ -95,7 +97,7 @@ export default function SettingsBottomSheet({ visible, onClose }: SettingsBottom
             </TouchableOpacity>
           </View>
 
-          <AdminRequestsPanel />
+          <AdminRequestsPanel orderAcceptStatus={orderAcceptStatus} onToggleOrderStatus={onToggleOrderStatus} />
         </View>
       </Modal>
     );

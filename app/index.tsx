@@ -149,17 +149,69 @@ export default function LogifyMakersApp() {
     try {
       // Try to load from cloud first
       if (supabaseService.isReady()) {
-        // In a real implementation, you'd have an admin settings table
-        // For now, we'll use local storage
+        const result = await supabaseService.getOrderStatus();
+        if (result.success && result.data) {
+          setOrderAcceptStatus(result.data.accepting_orders);
+          console.log('✅ Order status loaded from cloud:', result.data.accepting_orders);
+          return;
+        }
       }
       
-      // Load from local storage
+      // Fallback to local storage
       const status = await AsyncStorage.getItem('order_accept_status');
       if (status !== null) {
         setOrderAcceptStatus(JSON.parse(status));
+        console.log('✅ Order status loaded from local storage');
       }
     } catch (error) {
       console.error('Error loading order status:', error);
+    }
+  };
+
+  const handleToggleOrderStatus = async () => {
+    const newStatus = !orderAcceptStatus;
+    setOrderAcceptStatus(newStatus);
+    
+    try {
+      // Save to cloud if available
+      if (supabaseService.isReady() && user) {
+        const result = await supabaseService.updateOrderStatus(newStatus, user.discord_username);
+        if (result.success) {
+          console.log('✅ Order status updated in cloud');
+        } else {
+          console.error('❌ Failed to update order status in cloud:', result.error);
+        }
+      }
+      
+      // Always save to local storage as backup
+      await AsyncStorage.setItem('order_accept_status', JSON.stringify(newStatus));
+      console.log('✅ Order status updated locally');
+
+      // Send Discord notification
+      const webhookUrl = await AsyncStorage.getItem('discord_webhook_url');
+      if (webhookUrl) {
+        const message = newStatus 
+          ? 'We are now accepting new design requests!' 
+          : 'We have temporarily closed new orders.';
+          
+        const discordMessage = {
+          content: `🔄 **Global Order Status Changed**`,
+          embeds: [{
+            title: newStatus ? '✅ Orders Now Open' : '⏸️ Orders Temporarily Closed',
+            description: message,
+            color: newStatus ? 0x00ff00 : 0xff9900,
+            timestamp: new Date().toISOString(),
+            footer: {
+              text: 'Logify Makers - Global Status Update'
+            }
+          }]
+        };
+
+        await DiscordService.sendWebhookMessage(webhookUrl, discordMessage);
+        console.log('✅ Discord notification sent for order status change');
+      }
+    } catch (error) {
+      console.error('Error updating order status:', error);
     }
   };
 
@@ -185,77 +237,11 @@ export default function LogifyMakersApp() {
   };
 
   const checkAntiSpam = async (email: string, discordUsername: string): Promise<{ canSubmit: boolean; message?: string }> => {
-    try {
-      // Skip anti-spam check for admins
-      if (isAdmin) {
-        console.log('🔓 Admin user - bypassing anti-spam check');
-        return { canSubmit: true };
-      }
-
-      if (!supabaseService.isReady()) {
-        console.log('⚠️ Supabase not configured - skipping anti-spam check');
-        return { canSubmit: true };
-      }
-
-      // Check for recent submissions in the last hour
-      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-      
-      const { data, error } = await supabaseService.client
-        .from('request_submissions')
-        .select('*')
-        .or(`email.eq.${email},discord_username.eq.${discordUsername}`)
-        .gte('submitted_at', oneHourAgo)
-        .order('submitted_at', { ascending: false })
-        .limit(1);
-
-      if (error) {
-        console.error('❌ Error checking anti-spam:', error);
-        // If there's an error, allow submission but log it
-        return { canSubmit: true };
-      }
-
-      if (data && data.length > 0) {
-        const lastSubmission = new Date(data[0].submitted_at);
-        const timeDiff = Date.now() - lastSubmission.getTime();
-        const minutesLeft = Math.ceil((60 * 60 * 1000 - timeDiff) / (60 * 1000));
-        
-        return {
-          canSubmit: false,
-          message: `⏰ Anti-spam protection: Please wait ${minutesLeft} minutes before submitting another request. This helps us manage our workload effectively.`
-        };
-      }
-
-      return { canSubmit: true };
-    } catch (error) {
-      console.error('❌ Error in anti-spam check:', error);
-      // If there's an error, allow submission
-      return { canSubmit: true };
-    }
+    return await supabaseService.checkAntiSpam(email, discordUsername, isAdmin());
   };
 
   const recordSubmission = async (email: string, discordUsername: string) => {
-    try {
-      if (!supabaseService.isReady()) {
-        console.log('⚠️ Supabase not configured - skipping submission recording');
-        return;
-      }
-
-      const { error } = await supabaseService.client
-        .from('request_submissions')
-        .insert({
-          email: email,
-          discord_username: discordUsername,
-          submitted_at: new Date().toISOString()
-        });
-
-      if (error) {
-        console.error('❌ Error recording submission:', error);
-      } else {
-        console.log('✅ Submission recorded for anti-spam tracking');
-      }
-    } catch (error) {
-      console.error('❌ Error recording submission:', error);
-    }
+    await supabaseService.recordSubmission(email, discordUsername);
   };
 
   const handleSubmitRequest = async () => {
@@ -297,7 +283,7 @@ export default function LogifyMakersApp() {
     if (!antiSpamCheck.canSubmit) {
       Alert.alert(
         'Request Limit Reached 🛡️',
-        antiSpamCheck.message || 'Please wait before submitting another request.',
+        antiSpamCheck.message || "Oops, Looks like you have reached your limit of submitting the requests, Please try again after an hour",
         [{ text: 'OK', style: 'default' }]
       );
       return;
@@ -1422,6 +1408,8 @@ export default function LogifyMakersApp() {
       <SettingsBottomSheet
         visible={showSettings}
         onClose={() => setShowSettings(false)}
+        orderAcceptStatus={orderAcceptStatus}
+        onToggleOrderStatus={handleToggleOrderStatus}
       />
     </View>
   );

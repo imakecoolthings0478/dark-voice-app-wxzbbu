@@ -1,6 +1,6 @@
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { DesignRequest, GlobalMessage } from '../types';
+import { DesignRequest, GlobalMessage, OrderStatus } from '../types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Actual Supabase credentials for the project
@@ -259,6 +259,147 @@ class SupabaseService {
       console.error('❌ Failed to deactivate global message in Supabase:', error);
       return { success: false, error: 'Network error' };
     }
+  }
+
+  // Order Status Management
+  async getOrderStatus(): Promise<{ success: boolean; data?: OrderStatus; error?: string }> {
+    if (!this.isReady()) {
+      return { success: false, error: 'Supabase not configured' };
+    }
+
+    try {
+      const { data, error } = await this.supabase!
+        .from('order_status')
+        .select('*')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (error) {
+        console.error('Supabase fetch order status error:', error);
+        return { success: false, error: error.message };
+      }
+
+      return { success: true, data };
+    } catch (error) {
+      console.error('❌ Failed to fetch order status from Supabase:', error);
+      return { success: false, error: 'Network error' };
+    }
+  }
+
+  async updateOrderStatus(
+    acceptingOrders: boolean, 
+    updatedBy: string, 
+    message?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    if (!this.isReady()) {
+      return { success: false, error: 'Supabase not configured' };
+    }
+
+    try {
+      const { error } = await this.supabase!
+        .from('order_status')
+        .update({
+          accepting_orders: acceptingOrders,
+          updated_by: updatedBy,
+          updated_at: new Date().toISOString(),
+          message: message || (acceptingOrders ? 'We are currently accepting new design requests!' : 'We have temporarily closed new orders.')
+        })
+        .eq('id', (await this.getOrderStatus()).data?.id);
+
+      if (error) {
+        console.error('Supabase update order status error:', error);
+        return { success: false, error: error.message };
+      }
+
+      console.log('✅ Order status updated in Supabase');
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Failed to update order status in Supabase:', error);
+      return { success: false, error: 'Network error' };
+    }
+  }
+
+  // Anti-spam functionality
+  async checkAntiSpam(email: string, discordUsername: string, isAdmin: boolean = false): Promise<{ canSubmit: boolean; message?: string }> {
+    if (!this.isReady()) {
+      console.log('⚠️ Supabase not configured - skipping anti-spam check');
+      return { canSubmit: true };
+    }
+
+    // Skip anti-spam check for admins
+    if (isAdmin) {
+      console.log('🔓 Admin user - bypassing anti-spam check');
+      return { canSubmit: true };
+    }
+
+    try {
+      // Check for recent submissions in the last hour
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      
+      const { data, error } = await this.supabase!
+        .from('request_submissions')
+        .select('*')
+        .or(`email.eq.${email},discord_username.eq.${discordUsername}`)
+        .gte('submitted_at', oneHourAgo)
+        .order('submitted_at', { ascending: false })
+        .limit(1);
+
+      if (error) {
+        console.error('❌ Error checking anti-spam:', error);
+        // If there's an error, allow submission but log it
+        return { canSubmit: true };
+      }
+
+      if (data && data.length > 0) {
+        const lastSubmission = new Date(data[0].submitted_at);
+        const timeDiff = Date.now() - lastSubmission.getTime();
+        const minutesLeft = Math.ceil((60 * 60 * 1000 - timeDiff) / (60 * 1000));
+        
+        return {
+          canSubmit: false,
+          message: "Oops, Looks like you have reached your limit of submitting the requests, Please try again after an hour"
+        };
+      }
+
+      return { canSubmit: true };
+    } catch (error) {
+      console.error('❌ Error in anti-spam check:', error);
+      // If there's an error, allow submission
+      return { canSubmit: true };
+    }
+  }
+
+  async recordSubmission(email: string, discordUsername: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.isReady()) {
+      console.log('⚠️ Supabase not configured - skipping submission recording');
+      return { success: true };
+    }
+
+    try {
+      const { error } = await this.supabase!
+        .from('request_submissions')
+        .insert({
+          email: email,
+          discord_username: discordUsername,
+          submitted_at: new Date().toISOString()
+        });
+
+      if (error) {
+        console.error('❌ Error recording submission:', error);
+        return { success: false, error: error.message };
+      } else {
+        console.log('✅ Submission recorded for anti-spam tracking');
+        return { success: true };
+      }
+    } catch (error) {
+      console.error('❌ Error recording submission:', error);
+      return { success: false, error: 'Network error' };
+    }
+  }
+
+  get client() {
+    return this.supabase;
   }
 }
 

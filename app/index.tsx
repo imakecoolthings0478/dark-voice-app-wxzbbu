@@ -184,6 +184,80 @@ export default function LogifyMakersApp() {
     }
   };
 
+  const checkAntiSpam = async (email: string, discordUsername: string): Promise<{ canSubmit: boolean; message?: string }> => {
+    try {
+      // Skip anti-spam check for admins
+      if (isAdmin) {
+        console.log('🔓 Admin user - bypassing anti-spam check');
+        return { canSubmit: true };
+      }
+
+      if (!supabaseService.isReady()) {
+        console.log('⚠️ Supabase not configured - skipping anti-spam check');
+        return { canSubmit: true };
+      }
+
+      // Check for recent submissions in the last hour
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      
+      const { data, error } = await supabaseService.client
+        .from('request_submissions')
+        .select('*')
+        .or(`email.eq.${email},discord_username.eq.${discordUsername}`)
+        .gte('submitted_at', oneHourAgo)
+        .order('submitted_at', { ascending: false })
+        .limit(1);
+
+      if (error) {
+        console.error('❌ Error checking anti-spam:', error);
+        // If there's an error, allow submission but log it
+        return { canSubmit: true };
+      }
+
+      if (data && data.length > 0) {
+        const lastSubmission = new Date(data[0].submitted_at);
+        const timeDiff = Date.now() - lastSubmission.getTime();
+        const minutesLeft = Math.ceil((60 * 60 * 1000 - timeDiff) / (60 * 1000));
+        
+        return {
+          canSubmit: false,
+          message: `⏰ Anti-spam protection: Please wait ${minutesLeft} minutes before submitting another request. This helps us manage our workload effectively.`
+        };
+      }
+
+      return { canSubmit: true };
+    } catch (error) {
+      console.error('❌ Error in anti-spam check:', error);
+      // If there's an error, allow submission
+      return { canSubmit: true };
+    }
+  };
+
+  const recordSubmission = async (email: string, discordUsername: string) => {
+    try {
+      if (!supabaseService.isReady()) {
+        console.log('⚠️ Supabase not configured - skipping submission recording');
+        return;
+      }
+
+      const { error } = await supabaseService.client
+        .from('request_submissions')
+        .insert({
+          email: email,
+          discord_username: discordUsername,
+          submitted_at: new Date().toISOString()
+        });
+
+      if (error) {
+        console.error('❌ Error recording submission:', error);
+      } else {
+        console.log('✅ Submission recorded for anti-spam tracking');
+      }
+    } catch (error) {
+      console.error('❌ Error recording submission:', error);
+    }
+  };
+
   const handleSubmitRequest = async () => {
     // Check internet connection before submitting
     const connected = await NetworkService.checkInternetConnection();
@@ -213,6 +287,17 @@ export default function LogifyMakersApp() {
       Alert.alert(
         'Invalid Information ⚠️', 
         validation.errors.join('\n\n'),
+        [{ text: 'OK', style: 'default' }]
+      );
+      return;
+    }
+
+    // Check anti-spam (only for non-admin users)
+    const antiSpamCheck = await checkAntiSpam(email.trim(), discordUsername.trim());
+    if (!antiSpamCheck.canSubmit) {
+      Alert.alert(
+        'Request Limit Reached 🛡️',
+        antiSpamCheck.message || 'Please wait before submitting another request.',
         [{ text: 'OK', style: 'default' }]
       );
       return;
@@ -259,6 +344,9 @@ export default function LogifyMakersApp() {
         cloudSuccess = result.success;
         if (result.success) {
           console.log('✅ Request saved to cloud database');
+          
+          // Record submission for anti-spam tracking
+          await recordSubmission(requestData.email, requestData.discord_username);
         } else {
           console.log('❌ Failed to save to cloud:', result.error);
           throw new Error('Failed to save to cloud database');
@@ -267,15 +355,20 @@ export default function LogifyMakersApp() {
         throw new Error('Cloud database not configured');
       }
 
-      // Try to send to Discord if webhook is configured
-      const webhookUrl = await AsyncStorage.getItem('discord_webhook_url');
+      // Send to Discord webhook - using the hardcoded webhook URL
+      const webhookUrl = 'https://discord.com/api/webhooks/1415554112375885894/KiO3b06OI1SpTFnArMDbjaCzs-182nKqiOk6n1_bFkHBL9mw4YgA_x5hAxXiwsy0pIAC';
       let discordSuccess = false;
       
-      if (webhookUrl) {
+      try {
         discordSuccess = await DiscordService.sendRequestToDiscord(requestData, webhookUrl);
         if (discordSuccess) {
-          console.log('✅ Discord notification sent');
+          console.log('✅ Discord notification sent to webhook');
+        } else {
+          console.log('⚠️ Failed to send Discord notification');
         }
+      } catch (discordError) {
+        console.error('❌ Discord webhook error:', discordError);
+        // Don't fail the entire submission if Discord fails
       }
 
       // Show success popup with better styling
@@ -1064,7 +1157,7 @@ export default function LogifyMakersApp() {
                 editable={!submitting}
               />
 
-              {/* Email */}
+              {/* Email - Fixed styling to match other text boxes */}
               <Text style={[{
                 fontSize: 17,
                 color: colors.text,

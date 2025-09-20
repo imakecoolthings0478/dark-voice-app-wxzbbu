@@ -1,19 +1,23 @@
 
 import { Text, View, TextInput, ScrollView, TouchableOpacity, Alert, Linking } from 'react-native';
 import { useState } from 'react';
-import { commonStyles, colors, shadows } from '../styles/commonStyles';
+import { useTheme } from '../contexts/ThemeContext';
+import { shadows } from '../styles/commonStyles';
 import Button from '../components/Button';
 import Icon from '../components/Icon';
-import AdminPanel from '../components/AdminPanel';
+import SettingsBottomSheet from '../components/SettingsBottomSheet';
 import { useAuth } from '../hooks/useAuth';
 import { DiscordService } from '../services/discordService';
 import { DesignRequest } from '../types';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function LogifyMakersApp() {
   const { user, isAdmin, loading } = useAuth();
+  const { colors } = useTheme();
   const [showRequestForm, setShowRequestForm] = useState(false);
-  const [orderAcceptStatus, setOrderAcceptStatus] = useState(true); // true = accepting orders (green), false = not accepting (red)
+  const [orderAcceptStatus, setOrderAcceptStatus] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   
   // Form state
   const [clientName, setClientName] = useState('');
@@ -71,19 +75,37 @@ export default function LogifyMakersApp() {
     setSubmitting(true);
     
     try {
-      const requestData: Partial<DesignRequest> = {
+      const requestData: DesignRequest = {
+        id: `REQ-${Date.now()}`,
         client_name: clientName.trim(),
         service_type: serviceType,
         description: description.trim(),
         budget: budget.trim() || undefined,
         contact_info: contactInfo.trim(),
         status: 'pending',
+        created_at: new Date().toISOString(),
       };
 
       console.log('🚀 Submitting request:', requestData);
 
-      // Send to Discord
-      const discordSuccess = await DiscordService.sendRequestToDiscord(requestData);
+      // Save request locally
+      try {
+        const existingRequests = await AsyncStorage.getItem('design_requests');
+        const requests = existingRequests ? JSON.parse(existingRequests) : [];
+        requests.unshift(requestData);
+        await AsyncStorage.setItem('design_requests', JSON.stringify(requests));
+        console.log('✅ Request saved locally');
+      } catch (error) {
+        console.error('Error saving request locally:', error);
+      }
+
+      // Try to send to Discord if webhook is configured
+      const webhookUrl = await AsyncStorage.getItem('discord_webhook_url');
+      let discordSuccess = false;
+      
+      if (webhookUrl) {
+        discordSuccess = await DiscordService.sendRequestToDiscord(requestData, webhookUrl);
+      }
 
       if (discordSuccess) {
         Alert.alert(
@@ -103,8 +125,8 @@ export default function LogifyMakersApp() {
         );
       } else {
         Alert.alert(
-          'Request Submitted Locally 📝',
-          `Your request has been saved, but we couldn&apos;t send it to Discord right now. Please join our Discord and mention your request manually for faster processing.\n\nRequest ID: REQ-${Date.now()}`,
+          'Request Submitted! 📝',
+          `Your request has been saved successfully! ${webhookUrl ? 'We couldn&apos;t send it to Discord right now, but' : 'Configure Discord webhook in settings for instant notifications, or'} please join our Discord and mention your request for faster processing.\n\nRequest ID: ${requestData.id}`,
           [
             {
               text: 'Join Discord',
@@ -150,7 +172,6 @@ export default function LogifyMakersApp() {
   };
 
   const toggleOrderStatus = () => {
-    // Check if user is admin before allowing toggle
     if (!isAdmin()) {
       Alert.alert(
         'Access Denied 🚫',
@@ -171,21 +192,44 @@ export default function LogifyMakersApp() {
       return;
     }
 
-    // If user is admin, allow the toggle (this will be handled by AdminPanel)
     setOrderAcceptStatus(!orderAcceptStatus);
     console.log(`Admin ${user?.discord_username} changed order status to:`, !orderAcceptStatus ? 'Accepting' : 'Not Accepting');
   };
 
   if (loading) {
     return (
-      <View style={[commonStyles.container, commonStyles.center]}>
-        <View style={[commonStyles.avatarLarge, { marginBottom: 24 }]}>
+      <View style={[{ 
+        flex: 1, 
+        backgroundColor: colors.background,
+        alignItems: 'center',
+        justifyContent: 'center'
+      }]}>
+        <View style={[{
+          width: 80,
+          height: 80,
+          borderRadius: 40,
+          backgroundColor: colors.accent,
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginBottom: 24
+        }]}>
           <Icon name="hourglass" size={40} color="white" />
         </View>
-        <Text style={[commonStyles.title, { textAlign: 'center' }]}>
+        <Text style={[{
+          fontSize: 28,
+          fontWeight: '800',
+          textAlign: 'center',
+          color: colors.text,
+          marginBottom: 12,
+        }]}>
           Loading Logify Makers
         </Text>
-        <Text style={[commonStyles.textSecondary, { textAlign: 'center', marginTop: 8 }]}>
+        <Text style={[{
+          fontSize: 14,
+          color: colors.textSecondary,
+          textAlign: 'center',
+          marginTop: 8
+        }]}>
           Preparing your design experience...
         </Text>
       </View>
@@ -193,26 +237,82 @@ export default function LogifyMakersApp() {
   }
 
   return (
-    <View style={commonStyles.container}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      {/* Header with Settings Button */}
+      <View style={{
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+        paddingTop: 60,
+        paddingBottom: 20,
+        backgroundColor: colors.background,
+        borderBottomWidth: 1,
+        borderBottomColor: colors.border,
+      }}>
+        <View style={{ flex: 1 }} />
+        <Text style={{
+          fontSize: 20,
+          fontWeight: 'bold',
+          color: colors.text,
+          textAlign: 'center',
+        }}>
+          Logify Makers
+        </Text>
+        <View style={{ flex: 1, alignItems: 'flex-end' }}>
+          <TouchableOpacity
+            onPress={() => setShowSettings(true)}
+            style={{
+              backgroundColor: colors.card,
+              padding: 12,
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: colors.border,
+              ...shadows.medium,
+            }}
+          >
+            <Icon name="settings" size={24} color={colors.text} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
       <ScrollView 
         style={{ flex: 1, width: '100%' }} 
         contentContainerStyle={{ flexGrow: 1 }}
         showsVerticalScrollIndicator={false}
       >
-        <View style={commonStyles.content}>
-          {/* Header */}
+        <View style={{ flex: 1, alignItems: 'center', paddingTop: 20 }}>
+          {/* Main Header */}
           <View style={{ alignItems: 'center', marginBottom: 40, paddingHorizontal: 20 }}>
-            <View style={[commonStyles.avatarLarge, { 
-              marginBottom: 20,
+            <View style={[{
+              width: 80,
+              height: 80,
+              borderRadius: 40,
               backgroundColor: colors.accent,
-              ...shadows.large 
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 20,
+              ...shadows.large
             }]}>
               <Icon name="brush" size={40} color="white" />
             </View>
-            <Text style={[commonStyles.title, { fontSize: 36, marginBottom: 8 }]}>
+            <Text style={[{
+              fontSize: 36,
+              fontWeight: '800',
+              textAlign: 'center',
+              color: colors.text,
+              marginBottom: 8,
+            }]}>
               Logify Makers
             </Text>
-            <Text style={[commonStyles.subtitle, { fontSize: 18, opacity: 0.9, marginBottom: 16 }]}>
+            <Text style={[{
+              fontSize: 18,
+              fontWeight: '600',
+              textAlign: 'center',
+              color: colors.text,
+              opacity: 0.9,
+              marginBottom: 16
+            }]}>
               Professional Design Services
             </Text>
             <View style={{
@@ -223,58 +323,38 @@ export default function LogifyMakersApp() {
               borderWidth: 1,
               borderColor: colors.border,
             }}>
-              <Text style={[commonStyles.textSmall, { color: colors.accent, fontWeight: '600' }]}>
+              <Text style={[{
+                fontSize: 12,
+                color: colors.accent,
+                fontWeight: '600'
+              }]}>
                 ✨ Premium Quality • Fast Delivery • Affordable Prices
               </Text>
             </View>
-            
-            {user && (
-              <View style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                marginTop: 20,
-                backgroundColor: colors.cardElevated,
-                paddingHorizontal: 16,
-                paddingVertical: 10,
-                borderRadius: 20,
-                borderWidth: 1,
-                borderColor: colors.borderLight,
-                ...shadows.medium,
-              }}>
-                <Icon name="person-circle" size={20} color={colors.accent} style={{ marginRight: 10 }} />
-                <Text style={[commonStyles.text, { fontSize: 14, marginBottom: 0 }]}>
-                  Welcome back, <Text style={{ fontWeight: 'bold', color: colors.accent }}>{user.discord_username}</Text>
-                </Text>
-                {isAdmin() && (
-                  <View style={{
-                    backgroundColor: user.roles.includes('owner') ? colors.warning : colors.success,
-                    paddingHorizontal: 8,
-                    paddingVertical: 4,
-                    borderRadius: 10,
-                    marginLeft: 12,
-                  }}>
-                    <Text style={{ color: 'white', fontSize: 10, fontWeight: 'bold' }}>
-                      {user.roles.includes('owner') ? 'OWNER' : 'ADMIN'}
-                    </Text>
-                  </View>
-                )}
-              </View>
-            )}
           </View>
 
-          {/* Admin Panel - Only visible to admins */}
-          {isAdmin() && (
-            <AdminPanel 
-              orderAcceptStatus={orderAcceptStatus}
-              onToggleOrderStatus={() => setOrderAcceptStatus(!orderAcceptStatus)}
-            />
-          )}
-
           {/* Order Status Indicator */}
-          <View style={[commonStyles.professionalCard, { marginHorizontal: 20, marginBottom: 30, alignItems: 'center' }]}>
+          <View style={[{
+            backgroundColor: colors.card,
+            borderRadius: 20,
+            padding: 28,
+            marginVertical: 12,
+            width: '100%',
+            borderWidth: 1,
+            borderColor: colors.border,
+            marginHorizontal: 20,
+            marginBottom: 30,
+            alignItems: 'center',
+            ...shadows.large,
+          }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 20 }}>
               <Icon name="pulse" size={24} color={colors.accent} style={{ marginRight: 12 }} />
-              <Text style={[commonStyles.subtitle, { fontSize: 20, marginBottom: 0 }]}>
+              <Text style={[{
+                fontSize: 20,
+                fontWeight: '600',
+                color: colors.text,
+                marginBottom: 0
+              }]}>
                 Current Order Status
               </Text>
             </View>
@@ -307,20 +387,46 @@ export default function LogifyMakersApp() {
               </Text>
             </TouchableOpacity>
             
-            <Text style={[commonStyles.textSecondary, { textAlign: 'center', fontSize: 13 }]}>
+            <Text style={[{
+              fontSize: 13,
+              color: colors.textSecondary,
+              textAlign: 'center'
+            }]}>
               {isAdmin() ? '👆 Tap to toggle status (Admin Access)' : 'Only administrators can change this status'}
             </Text>
           </View>
 
           {/* About Us Section */}
-          <View style={[commonStyles.professionalCard, { marginHorizontal: 20, marginBottom: 30 }]}>
+          <View style={[{
+            backgroundColor: colors.card,
+            borderRadius: 20,
+            padding: 28,
+            marginVertical: 12,
+            width: '100%',
+            borderWidth: 1,
+            borderColor: colors.border,
+            marginHorizontal: 20,
+            marginBottom: 30,
+            ...shadows.large,
+          }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 20 }}>
               <Icon name="information-circle" size={24} color={colors.accent} style={{ marginRight: 12 }} />
-              <Text style={[commonStyles.subtitle, { fontSize: 22, marginBottom: 0 }]}>
+              <Text style={[{
+                fontSize: 22,
+                fontWeight: '600',
+                color: colors.text,
+                marginBottom: 0
+              }]}>
                 About Us
               </Text>
             </View>
-            <Text style={[commonStyles.text, { fontSize: 16, textAlign: 'center', lineHeight: 26, opacity: 0.9 }]}>
+            <Text style={[{
+              fontSize: 16,
+              color: colors.text,
+              textAlign: 'center',
+              lineHeight: 26,
+              opacity: 0.9
+            }]}>
               We Logify Makers create stunning logos, YouTube banners, professional profile photos, and eye-catching thumbnails at incredibly affordable prices. We pride ourselves on delivering the best service and support in the industry.
             </Text>
             <View style={{
@@ -332,26 +438,53 @@ export default function LogifyMakersApp() {
               borderTopColor: colors.border,
             }}>
               <View style={{ alignItems: 'center' }}>
-                <Text style={[commonStyles.text, { fontSize: 20, fontWeight: 'bold', color: colors.success, marginBottom: 4 }]}>
+                <Text style={[{
+                  fontSize: 20,
+                  fontWeight: 'bold',
+                  color: colors.success,
+                  marginBottom: 4
+                }]}>
                   500+
                 </Text>
-                <Text style={[commonStyles.textSmall, { textAlign: 'center' }]}>
+                <Text style={[{
+                  fontSize: 12,
+                  color: colors.textSecondary,
+                  textAlign: 'center'
+                }]}>
                   Happy Clients
                 </Text>
               </View>
               <View style={{ alignItems: 'center' }}>
-                <Text style={[commonStyles.text, { fontSize: 20, fontWeight: 'bold', color: colors.accent, marginBottom: 4 }]}>
+                <Text style={[{
+                  fontSize: 20,
+                  fontWeight: 'bold',
+                  color: colors.accent,
+                  marginBottom: 4
+                }]}>
                   24h
                 </Text>
-                <Text style={[commonStyles.textSmall, { textAlign: 'center' }]}>
+                <Text style={[{
+                  fontSize: 12,
+                  color: colors.textSecondary,
+                  textAlign: 'center'
+                }]}>
                   Fast Delivery
                 </Text>
               </View>
               <View style={{ alignItems: 'center' }}>
-                <Text style={[commonStyles.text, { fontSize: 20, fontWeight: 'bold', color: colors.warning, marginBottom: 4 }]}>
+                <Text style={[{
+                  fontSize: 20,
+                  fontWeight: 'bold',
+                  color: colors.warning,
+                  marginBottom: 4
+                }]}>
                   100%
                 </Text>
-                <Text style={[commonStyles.textSmall, { textAlign: 'center' }]}>
+                <Text style={[{
+                  fontSize: 12,
+                  color: colors.textSecondary,
+                  textAlign: 'center'
+                }]}>
                   Satisfaction
                 </Text>
               </View>
@@ -359,10 +492,26 @@ export default function LogifyMakersApp() {
           </View>
 
           {/* Services Grid */}
-          <View style={[commonStyles.professionalCard, { marginHorizontal: 20, marginBottom: 30 }]}>
+          <View style={[{
+            backgroundColor: colors.card,
+            borderRadius: 20,
+            padding: 28,
+            marginVertical: 12,
+            width: '100%',
+            borderWidth: 1,
+            borderColor: colors.border,
+            marginHorizontal: 20,
+            marginBottom: 30,
+            ...shadows.large,
+          }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 25 }}>
               <Icon name="grid" size={24} color={colors.accent} style={{ marginRight: 12 }} />
-              <Text style={[commonStyles.subtitle, { fontSize: 22, marginBottom: 0 }]}>
+              <Text style={[{
+                fontSize: 22,
+                fontWeight: '600',
+                color: colors.text,
+                marginBottom: 0
+              }]}>
                 Our Services
               </Text>
             </View>
@@ -398,9 +547,9 @@ export default function LogifyMakersApp() {
                       color={serviceType === service.name ? 'white' : 'white'}
                     />
                   </View>
-                  <Text style={[commonStyles.text, { 
-                    fontSize: 13, 
-                    textAlign: 'center', 
+                  <Text style={[{
+                    fontSize: 13,
+                    textAlign: 'center',
                     fontWeight: '600',
                     color: serviceType === service.name ? 'white' : colors.text,
                     marginBottom: 0,
@@ -466,7 +615,7 @@ export default function LogifyMakersApp() {
                   {submitting ? 'Submitting Request...' : (showRequestForm ? 'Close Request Form' : 'Submit New Request')}
                 </Text>
                 <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12 }}>
-                  {submitting ? 'Sending to our team via Discord' : (showRequestForm ? 'Hide the request form' : 'Tell us about your project')}
+                  {submitting ? 'Processing your request' : (showRequestForm ? 'Hide the request form' : 'Tell us about your project')}
                 </Text>
               </View>
             </TouchableOpacity>
@@ -474,10 +623,26 @@ export default function LogifyMakersApp() {
 
           {/* Request Form */}
           {showRequestForm && (
-            <View style={[commonStyles.professionalCard, { marginHorizontal: 20, marginBottom: 30 }]}>
+            <View style={[{
+              backgroundColor: colors.card,
+              borderRadius: 20,
+              padding: 28,
+              marginVertical: 12,
+              width: '100%',
+              borderWidth: 1,
+              borderColor: colors.border,
+              marginHorizontal: 20,
+              marginBottom: 30,
+              ...shadows.large,
+            }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 25 }}>
                 <Icon name="document-text" size={24} color={colors.accent} style={{ marginRight: 12 }} />
-                <Text style={[commonStyles.subtitle, { fontSize: 22, marginBottom: 0 }]}>
+                <Text style={[{
+                  fontSize: 22,
+                  fontWeight: '600',
+                  color: colors.text,
+                  marginBottom: 0
+                }]}>
                   Submit Your Request
                 </Text>
               </View>
@@ -501,30 +666,26 @@ export default function LogifyMakersApp() {
                 </View>
               )}
 
-              {/* Discord Integration Notice */}
-              <View style={{
-                backgroundColor: DiscordService.isWebhookConfigured() ? '#5865F2' : colors.warning,
-                padding: 20,
-                borderRadius: 12,
-                marginBottom: 25,
-                alignItems: 'center'
-              }}>
-                <Icon name="logo-discord" size={24} color="white" style={{ marginBottom: 8 }} />
-                <Text style={{ color: 'white', fontWeight: 'bold', textAlign: 'center', fontSize: 16 }}>
-                  {DiscordService.isWebhookConfigured() ? '🚀 Discord Integration Active' : '⚠️ Discord Webhook Not Configured'}
-                </Text>
-                <Text style={{ color: 'white', fontSize: 13, textAlign: 'center', marginTop: 8, opacity: 0.9 }}>
-                  {DiscordService.isWebhookConfigured() 
-                    ? 'Your request will be sent directly to our Discord channel for lightning-fast processing!'
-                    : 'Requests will be saved locally. Ask an admin to configure the webhook for Discord integration.'
-                  }
-                </Text>
-              </View>
-
               {/* Client Name */}
-              <Text style={[commonStyles.text, { marginBottom: 8, fontWeight: '600' }]}>Your Name *</Text>
+              <Text style={[{
+                fontSize: 16,
+                color: colors.text,
+                marginBottom: 8,
+                fontWeight: '600'
+              }]}>Your Name *</Text>
               <TextInput
-                style={[commonStyles.textInput, { marginBottom: 20 }]}
+                style={[{
+                  backgroundColor: colors.backgroundAlt,
+                  borderColor: colors.border,
+                  borderWidth: 1,
+                  borderRadius: 12,
+                  padding: 16,
+                  color: colors.text,
+                  fontSize: 16,
+                  minHeight: 50,
+                  marginBottom: 20,
+                  ...shadows.small,
+                }]}
                 placeholder="Enter your full name"
                 placeholderTextColor={colors.textSecondary}
                 value={clientName}
@@ -533,34 +694,34 @@ export default function LogifyMakersApp() {
               />
 
               {/* Service Type */}
-              <Text style={[commonStyles.text, { marginBottom: 12, fontWeight: '600' }]}>Service Type *</Text>
+              <Text style={[{
+                fontSize: 16,
+                color: colors.text,
+                marginBottom: 12,
+                fontWeight: '600'
+              }]}>Service Type *</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }}>
                 {services.map((service) => (
                   <TouchableOpacity
                     key={service.name}
                     onPress={() => setServiceType(service.name)}
                     disabled={submitting}
-                    style={[
-                      commonStyles.chip,
-                      serviceType === service.name && commonStyles.chipSelected,
-                      {
-                        backgroundColor: serviceType === service.name ? service.color : colors.backgroundAlt,
-                        borderColor: serviceType === service.name ? service.color : colors.border,
-                        opacity: submitting ? 0.7 : 1,
-                        paddingHorizontal: 16,
-                        paddingVertical: 12,
-                        marginRight: 12,
-                      }
-                    ]}
+                    style={[{
+                      backgroundColor: serviceType === service.name ? service.color : colors.backgroundAlt,
+                      borderColor: serviceType === service.name ? service.color : colors.border,
+                      opacity: submitting ? 0.7 : 1,
+                      paddingHorizontal: 16,
+                      paddingVertical: 12,
+                      marginRight: 12,
+                      borderWidth: 1,
+                      borderRadius: 20,
+                    }]}
                   >
-                    <Text style={[
-                      commonStyles.chipText,
-                      { 
-                        fontSize: 14, 
-                        fontWeight: '600',
-                        color: serviceType === service.name ? 'white' : colors.text 
-                      }
-                    ]}>
+                    <Text style={[{
+                      fontSize: 14,
+                      fontWeight: '600',
+                      color: serviceType === service.name ? 'white' : colors.text
+                    }]}>
                       {service.name}
                     </Text>
                   </TouchableOpacity>
@@ -568,9 +729,26 @@ export default function LogifyMakersApp() {
               </ScrollView>
 
               {/* Description */}
-              <Text style={[commonStyles.text, { marginBottom: 8, fontWeight: '600' }]}>Project Description *</Text>
+              <Text style={[{
+                fontSize: 16,
+                color: colors.text,
+                marginBottom: 8,
+                fontWeight: '600'
+              }]}>Project Description *</Text>
               <TextInput
-                style={[commonStyles.textInput, { marginBottom: 20, minHeight: 120 }]}
+                style={[{
+                  backgroundColor: colors.backgroundAlt,
+                  borderColor: colors.border,
+                  borderWidth: 1,
+                  borderRadius: 12,
+                  padding: 16,
+                  color: colors.text,
+                  fontSize: 16,
+                  minHeight: 120,
+                  marginBottom: 20,
+                  textAlignVertical: 'top',
+                  ...shadows.small,
+                }]}
                 placeholder="Describe your project in detail. Include style preferences, colors, dimensions, and any specific requirements..."
                 placeholderTextColor={colors.textSecondary}
                 value={description}
@@ -580,9 +758,25 @@ export default function LogifyMakersApp() {
               />
 
               {/* Budget */}
-              <Text style={[commonStyles.text, { marginBottom: 8, fontWeight: '600' }]}>Budget Range (Optional)</Text>
+              <Text style={[{
+                fontSize: 16,
+                color: colors.text,
+                marginBottom: 8,
+                fontWeight: '600'
+              }]}>Budget Range (Optional)</Text>
               <TextInput
-                style={[commonStyles.textInput, { marginBottom: 20 }]}
+                style={[{
+                  backgroundColor: colors.backgroundAlt,
+                  borderColor: colors.border,
+                  borderWidth: 1,
+                  borderRadius: 12,
+                  padding: 16,
+                  color: colors.text,
+                  fontSize: 16,
+                  minHeight: 50,
+                  marginBottom: 20,
+                  ...shadows.small,
+                }]}
                 placeholder="e.g., $50-100, €30-60, or your preferred range"
                 placeholderTextColor={colors.textSecondary}
                 value={budget}
@@ -591,9 +785,25 @@ export default function LogifyMakersApp() {
               />
 
               {/* Contact Info */}
-              <Text style={[commonStyles.text, { marginBottom: 8, fontWeight: '600' }]}>Contact Information *</Text>
+              <Text style={[{
+                fontSize: 16,
+                color: colors.text,
+                marginBottom: 8,
+                fontWeight: '600'
+              }]}>Contact Information *</Text>
               <TextInput
-                style={[commonStyles.textInput, { marginBottom: 25 }]}
+                style={[{
+                  backgroundColor: colors.backgroundAlt,
+                  borderColor: colors.border,
+                  borderWidth: 1,
+                  borderRadius: 12,
+                  padding: 16,
+                  color: colors.text,
+                  fontSize: 16,
+                  minHeight: 50,
+                  marginBottom: 25,
+                  ...shadows.small,
+                }]}
                 placeholder="Discord username, email, or phone number"
                 placeholderTextColor={colors.textSecondary}
                 value={contactInfo}
@@ -620,7 +830,7 @@ export default function LogifyMakersApp() {
                   )}
                   <View>
                     <Text style={{ color: 'white', fontSize: 18, fontWeight: 'bold', marginBottom: 2 }}>
-                      {submitting ? 'Sending to Discord...' : (orderAcceptStatus ? 'Submit Request' : 'Submit Anyway')}
+                      {submitting ? 'Submitting...' : (orderAcceptStatus ? 'Submit Request' : 'Submit Anyway')}
                     </Text>
                     <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12, textAlign: 'center' }}>
                       {submitting ? 'Please wait while we process your request' : 'We&apos;ll get back to you within 24 hours'}
@@ -642,45 +852,32 @@ export default function LogifyMakersApp() {
               borderColor: colors.border,
               width: '100%',
             }}>
-              <Text style={[commonStyles.textSecondary, { fontSize: 14, textAlign: 'center', marginBottom: 8 }]}>
+              <Text style={[{
+                fontSize: 14,
+                color: colors.textSecondary,
+                textAlign: 'center',
+                marginBottom: 8
+              }]}>
                 © 2024 Logify Makers - Professional Design Services
               </Text>
-              <Text style={[commonStyles.textSmall, { textAlign: 'center', opacity: 0.7 }]}>
+              <Text style={[{
+                fontSize: 12,
+                color: colors.textSecondary,
+                textAlign: 'center',
+                opacity: 0.7
+              }]}>
                 Crafting exceptional designs with passion and precision
               </Text>
-              {user && (
-                <View style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  marginTop: 12,
-                  paddingTop: 12,
-                  borderTopWidth: 1,
-                  borderTopColor: colors.border,
-                  width: '100%',
-                  justifyContent: 'center',
-                }}>
-                  <Icon name="person" size={12} color={colors.accent} style={{ marginRight: 6 }} />
-                  <Text style={[commonStyles.textSmall, { color: colors.accent }]}>
-                    Connected as {user.discord_username}
-                  </Text>
-                  <Text style={[commonStyles.textSmall, { marginLeft: 8, marginRight: 8 }]}>•</Text>
-                  <Icon 
-                    name={DiscordService.isWebhookConfigured() ? "checkmark-circle" : "warning"} 
-                    size={12} 
-                    color={DiscordService.isWebhookConfigured() ? colors.success : colors.warning} 
-                    style={{ marginRight: 6 }} 
-                  />
-                  <Text style={[commonStyles.textSmall, { 
-                    color: DiscordService.isWebhookConfigured() ? colors.success : colors.warning 
-                  }]}>
-                    {DiscordService.isWebhookConfigured() ? 'Discord Active' : 'Webhook Pending'}
-                  </Text>
-                </View>
-              )}
             </View>
           </View>
         </View>
       </ScrollView>
+
+      {/* Settings Bottom Sheet */}
+      <SettingsBottomSheet
+        visible={showSettings}
+        onClose={() => setShowSettings(false)}
+      />
     </View>
   );
 }

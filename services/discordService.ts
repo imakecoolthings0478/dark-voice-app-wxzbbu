@@ -1,5 +1,6 @@
 
 import { DesignRequest } from '../types';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface DiscordWebhookPayload {
   content?: string;
@@ -23,11 +24,38 @@ interface DiscordWebhookPayload {
 }
 
 export class DiscordService {
-  // Your Discord webhook URL - now properly configured
-  private static WEBHOOK_URL = 'https://discord.com/api/webhooks/1415554112375885894/KiO3b06OI1SpTFnArMDbjaCzs-182nKqiOk6n1_bFkHBL9mw4YgA_x5hAxXiwsy0pIAC';
-
-  static async sendRequestToDiscord(request: Partial<DesignRequest>): Promise<boolean> {
+  static async getWebhookUrl(): Promise<string | null> {
     try {
+      return await AsyncStorage.getItem('discord_webhook_url');
+    } catch (error) {
+      console.error('Error getting webhook URL:', error);
+      return null;
+    }
+  }
+
+  static async setWebhookUrl(url: string): Promise<boolean> {
+    try {
+      if (!url || !url.startsWith('https://discord.com/api/webhooks/')) {
+        throw new Error('Invalid webhook URL format');
+      }
+      await AsyncStorage.setItem('discord_webhook_url', url);
+      console.log('✅ Discord webhook URL saved successfully');
+      return true;
+    } catch (error) {
+      console.error('Error saving webhook URL:', error);
+      return false;
+    }
+  }
+
+  static async sendRequestToDiscord(request: DesignRequest, webhookUrl?: string): Promise<boolean> {
+    try {
+      const url = webhookUrl || await this.getWebhookUrl();
+      
+      if (!url) {
+        console.log('⚠️ No webhook URL configured, skipping Discord notification');
+        return false;
+      }
+
       console.log('🚀 Sending request to Discord:', request);
 
       const embed = {
@@ -62,12 +90,12 @@ export class DiscordService {
           },
           {
             name: '📅 Submitted',
-            value: new Date().toLocaleString(),
+            value: new Date(request.created_at).toLocaleString(),
             inline: true,
           },
           {
             name: '🆔 Request ID',
-            value: `REQ-${Date.now()}`,
+            value: request.id,
             inline: true,
           },
         ],
@@ -87,8 +115,7 @@ export class DiscordService {
 
       console.log('📤 Sending payload to Discord webhook...');
 
-      // Make HTTP request to Discord webhook
-      const response = await fetch(this.WEBHOOK_URL, {
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -107,22 +134,19 @@ export class DiscordService {
       return true;
     } catch (error) {
       console.error('❌ Failed to send request to Discord:', error);
-      
-      // Log detailed error information
-      if (error instanceof Error) {
-        console.error('Error details:', {
-          message: error.message,
-          stack: error.stack,
-          webhookUrl: this.WEBHOOK_URL.substring(0, 50) + '...',
-        });
-      }
-      
       return false;
     }
   }
 
-  static async sendStatusUpdate(message: string, isAccepting: boolean): Promise<boolean> {
+  static async sendStatusUpdate(message: string, isAccepting: boolean, webhookUrl?: string): Promise<boolean> {
     try {
+      const url = webhookUrl || await this.getWebhookUrl();
+      
+      if (!url) {
+        console.log('⚠️ No webhook URL configured, skipping Discord notification');
+        return false;
+      }
+
       console.log('📢 Sending status update to Discord:', { message, isAccepting });
 
       const embed = {
@@ -162,7 +186,7 @@ export class DiscordService {
         embeds: [embed],
       };
 
-      const response = await fetch(this.WEBHOOK_URL, {
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -185,8 +209,15 @@ export class DiscordService {
     }
   }
 
-  static async sendAdminAlert(message: string, adminAction: string): Promise<boolean> {
+  static async sendAdminAlert(message: string, adminAction: string, webhookUrl?: string): Promise<boolean> {
     try {
+      const url = webhookUrl || await this.getWebhookUrl();
+      
+      if (!url) {
+        console.log('⚠️ No webhook URL configured, skipping Discord notification');
+        return false;
+      }
+
       console.log('🚨 Sending admin alert to Discord:', { message, adminAction });
 
       const embed = {
@@ -224,7 +255,7 @@ export class DiscordService {
         embeds: [embed],
       };
 
-      const response = await fetch(this.WEBHOOK_URL, {
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -247,37 +278,16 @@ export class DiscordService {
     }
   }
 
-  // Method to update webhook URL (for when user provides it)
-  static updateWebhookUrl(newUrl: string): void {
-    if (newUrl && newUrl.startsWith('https://discord.com/api/webhooks/')) {
-      this.WEBHOOK_URL = newUrl;
-      console.log('✅ Discord webhook URL updated successfully');
-      console.log('🔗 New webhook URL:', newUrl.substring(0, 50) + '...');
-    } else {
-      console.error('❌ Invalid Discord webhook URL format');
-      throw new Error('Invalid Discord webhook URL format. Must start with "https://discord.com/api/webhooks/"');
-    }
+  static async isWebhookConfigured(): Promise<boolean> {
+    const url = await this.getWebhookUrl();
+    return url !== null && url.startsWith('https://discord.com/api/webhooks/');
   }
 
-  // Method to check if webhook is configured
-  static isWebhookConfigured(): boolean {
-    return this.WEBHOOK_URL && 
-           this.WEBHOOK_URL.startsWith('https://discord.com/api/webhooks/') && 
-           !this.WEBHOOK_URL.includes('YOUR_WEBHOOK');
-  }
-
-  // Method to get webhook status
-  static getWebhookStatus(): { configured: boolean; url: string } {
-    return {
-      configured: this.isWebhookConfigured(),
-      url: this.WEBHOOK_URL ? this.WEBHOOK_URL.substring(0, 50) + '...' : 'Not configured',
-    };
-  }
-
-  // Method to test webhook connectivity
-  static async testWebhookConnection(): Promise<{ success: boolean; message: string }> {
+  static async testWebhookConnection(webhookUrl?: string): Promise<{ success: boolean; message: string }> {
     try {
-      if (!this.isWebhookConfigured()) {
+      const url = webhookUrl || await this.getWebhookUrl();
+      
+      if (!url) {
         return {
           success: false,
           message: 'Webhook URL not configured',
@@ -297,7 +307,7 @@ export class DiscordService {
         }],
       };
 
-      const response = await fetch(this.WEBHOOK_URL, {
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

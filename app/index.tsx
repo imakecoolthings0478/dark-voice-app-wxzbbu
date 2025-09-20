@@ -1,13 +1,19 @@
 
 import { Text, View, TextInput, ScrollView, TouchableOpacity, Alert, Linking } from 'react-native';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTheme } from '../contexts/ThemeContext';
 import { shadows } from '../styles/commonStyles';
 import Button from '../components/Button';
 import Icon from '../components/Icon';
 import SettingsBottomSheet from '../components/SettingsBottomSheet';
+import GlobalMessageBanner from '../components/GlobalMessageBanner';
+import NoInternetScreen from '../components/NoInternetScreen';
+import MyRequestsPanel from '../components/MyRequestsPanel';
 import { useAuth } from '../hooks/useAuth';
 import { DiscordService } from '../services/discordService';
+import { NetworkService } from '../services/networkService';
+import { ValidationService } from '../services/validationService';
+import { supabaseService } from '../services/supabaseService';
 import { DesignRequest } from '../types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -15,12 +21,17 @@ export default function LogifyMakersApp() {
   const { user, isAdmin, loading } = useAuth();
   const { colors } = useTheme();
   const [showRequestForm, setShowRequestForm] = useState(false);
+  const [showMyRequests, setShowMyRequests] = useState(false);
   const [orderAcceptStatus, setOrderAcceptStatus] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [isConnected, setIsConnected] = useState(true);
+  const [checkingConnection, setCheckingConnection] = useState(true);
   
-  // Form state
+  // Form state with new fields
   const [clientName, setClientName] = useState('');
+  const [email, setEmail] = useState('');
+  const [discordUsername, setDiscordUsername] = useState('');
   const [serviceType, setServiceType] = useState('');
   const [description, setDescription] = useState('');
   const [budget, setBudget] = useState('');
@@ -33,6 +44,33 @@ export default function LogifyMakersApp() {
     { name: 'YouTube Thumbnail', icon: 'play-outline', color: colors.professional.orange },
     { name: 'Custom Design', icon: 'create-outline', color: colors.professional.pink }
   ];
+
+  useEffect(() => {
+    initializeApp();
+  }, []);
+
+  const initializeApp = async () => {
+    try {
+      // Check internet connection
+      const connected = await NetworkService.checkInternetConnection();
+      setIsConnected(connected);
+      
+      if (connected) {
+        // Initialize Supabase if configured
+        await supabaseService.loadConfiguration();
+        console.log('App initialized successfully');
+      }
+    } catch (error) {
+      console.error('Error initializing app:', error);
+    } finally {
+      setCheckingConnection(false);
+    }
+  };
+
+  const handleRetryConnection = async () => {
+    setCheckingConnection(true);
+    await initializeApp();
+  };
 
   const handleDiscordLink = async () => {
     const discordUrl = 'https://discord.gg/7kj6eHGrAS';
@@ -51,8 +89,25 @@ export default function LogifyMakersApp() {
   };
 
   const handleSubmitRequest = async () => {
-    if (!clientName.trim() || !serviceType || !description.trim() || !contactInfo.trim()) {
-      Alert.alert('Missing Information ⚠️', 'Please fill in all required fields to submit your request.');
+    // Validate form data
+    const requestData = {
+      client_name: clientName,
+      email: email,
+      discord_username: discordUsername,
+      service_type: serviceType,
+      description: description,
+      budget: budget,
+      contact_info: contactInfo,
+    };
+
+    const validation = ValidationService.validateRequest(requestData);
+    
+    if (!validation.isValid) {
+      Alert.alert(
+        'Invalid Information ⚠️', 
+        validation.errors.join('\n\n'),
+        [{ text: 'OK', style: 'default' }]
+      );
       return;
     }
 
@@ -77,18 +132,32 @@ export default function LogifyMakersApp() {
     try {
       const requestData: DesignRequest = {
         id: `REQ-${Date.now()}`,
-        client_name: clientName.trim(),
+        client_name: ValidationService.sanitizeInput(clientName),
+        email: ValidationService.sanitizeInput(email),
+        discord_username: ValidationService.sanitizeInput(discordUsername),
         service_type: serviceType,
-        description: description.trim(),
+        description: ValidationService.sanitizeInput(description),
         budget: budget.trim() || undefined,
-        contact_info: contactInfo.trim(),
+        contact_info: ValidationService.sanitizeInput(contactInfo),
         status: 'pending',
         created_at: new Date().toISOString(),
       };
 
       console.log('🚀 Submitting request:', requestData);
 
-      // Save request locally
+      // Save to cloud (Supabase) first
+      let cloudSuccess = false;
+      if (supabaseService.isReady()) {
+        const result = await supabaseService.createRequest(requestData);
+        cloudSuccess = result.success;
+        if (result.success) {
+          console.log('✅ Request saved to cloud');
+        } else {
+          console.log('❌ Failed to save to cloud:', result.error);
+        }
+      }
+
+      // Save request locally as backup
       try {
         const existingRequests = await AsyncStorage.getItem('design_requests');
         const requests = existingRequests ? JSON.parse(existingRequests) : [];
@@ -107,18 +176,27 @@ export default function LogifyMakersApp() {
         discordSuccess = await DiscordService.sendRequestToDiscord(requestData, webhookUrl);
       }
 
+      // Show success message
+      const successMessage = cloudSuccess 
+        ? 'Your request has been submitted and saved to our cloud database!'
+        : 'Your request has been submitted and saved locally!';
+
       if (discordSuccess) {
         Alert.alert(
           'Request Submitted Successfully! 🎉', 
-          `Thank you ${clientName}! Your ${serviceType.toLowerCase()} request has been sent to our team via Discord. We&apos;ll review it and contact you soon at ${contactInfo}.\n\nJoin our Discord community for real-time updates and exclusive offers!`,
+          `${successMessage} Our team has been notified via Discord and will review your ${serviceType.toLowerCase()} request soon.\n\nWe'll contact you at ${email} with updates.\n\nRequest ID: ${requestData.id}`,
           [
             {
-              text: 'Join Discord',
-              onPress: handleDiscordLink,
+              text: 'View My Requests',
+              onPress: () => {
+                clearForm();
+                setShowMyRequests(true);
+              },
               style: 'default'
             },
             {
-              text: 'Perfect!',
+              text: 'Join Discord',
+              onPress: handleDiscordLink,
               style: 'default'
             }
           ]
@@ -126,34 +204,32 @@ export default function LogifyMakersApp() {
       } else {
         Alert.alert(
           'Request Submitted! 📝',
-          `Your request has been saved successfully! ${webhookUrl ? 'We couldn&apos;t send it to Discord right now, but' : 'Configure Discord webhook in settings for instant notifications, or'} please join our Discord and mention your request for faster processing.\n\nRequest ID: ${requestData.id}`,
+          `${successMessage} ${webhookUrl ? 'We couldn&apos;t send it to Discord right now, but' : 'Configure Discord webhook in settings for instant notifications, or'} please join our Discord and mention your request for faster processing.\n\nRequest ID: ${requestData.id}`,
           [
             {
-              text: 'Join Discord',
-              onPress: handleDiscordLink,
+              text: 'View My Requests',
+              onPress: () => {
+                clearForm();
+                setShowMyRequests(true);
+              },
               style: 'default'
             },
             {
-              text: 'OK',
+              text: 'Join Discord',
+              onPress: handleDiscordLink,
               style: 'default'
             }
           ]
         );
       }
 
-      // Clear form
-      setClientName('');
-      setServiceType('');
-      setDescription('');
-      setBudget('');
-      setContactInfo('');
-      setShowRequestForm(false);
+      clearForm();
 
     } catch (error) {
       console.error('Error submitting request:', error);
       Alert.alert(
         'Submission Error ❌', 
-        'Failed to submit request. Please try again or contact us directly on Discord for immediate assistance.',
+        'Failed to submit request. Please check your internet connection and try again, or contact us directly on Discord for immediate assistance.',
         [
           {
             text: 'Join Discord',
@@ -171,30 +247,61 @@ export default function LogifyMakersApp() {
     }
   };
 
-  const toggleOrderStatus = () => {
-    if (!isAdmin()) {
-      Alert.alert(
-        'Access Denied 🚫',
-        "You&apos;re not an admin. Only users with &apos;owner&apos; or &apos;admin&apos; roles can change the order status.\n\nContact an admin on Discord if you need to make changes.",
-        [
-          {
-            text: 'Join Discord',
-            onPress: handleDiscordLink,
-            style: 'default'
-          },
-          {
-            text: 'OK',
-            style: 'default'
-          }
-        ]
-      );
-      console.log(`Non-admin user ${user?.discord_username || 'Anonymous'} attempted to change order status`);
-      return;
-    }
-
-    setOrderAcceptStatus(!orderAcceptStatus);
-    console.log(`Admin ${user?.discord_username} changed order status to:`, !orderAcceptStatus ? 'Accepting' : 'Not Accepting');
+  const clearForm = () => {
+    setClientName('');
+    setEmail('');
+    setDiscordUsername('');
+    setServiceType('');
+    setDescription('');
+    setBudget('');
+    setContactInfo('');
+    setShowRequestForm(false);
   };
+
+  // Show no internet screen if not connected
+  if (checkingConnection) {
+    return (
+      <View style={[{ 
+        flex: 1, 
+        backgroundColor: colors.background,
+        alignItems: 'center',
+        justifyContent: 'center'
+      }]}>
+        <View style={[{
+          width: 80,
+          height: 80,
+          borderRadius: 40,
+          backgroundColor: colors.accent,
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginBottom: 24
+        }]}>
+          <Icon name="hourglass" size={40} color="white" />
+        </View>
+        <Text style={[{
+          fontSize: 28,
+          fontWeight: '800',
+          textAlign: 'center',
+          color: colors.text,
+          marginBottom: 12,
+        }]}>
+          Loading Logify Makers
+        </Text>
+        <Text style={[{
+          fontSize: 14,
+          color: colors.textSecondary,
+          textAlign: 'center',
+          marginTop: 8
+        }]}>
+          Checking internet connection...
+        </Text>
+      </View>
+    );
+  }
+
+  if (!isConnected) {
+    return <NoInternetScreen onRetry={handleRetryConnection} />;
+  }
 
   if (loading) {
     return (
@@ -236,8 +343,76 @@ export default function LogifyMakersApp() {
     );
   }
 
+  // Show My Requests panel
+  if (showMyRequests) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <GlobalMessageBanner />
+        
+        {/* Header */}
+        <View style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingHorizontal: 20,
+          paddingTop: 60,
+          paddingBottom: 20,
+          backgroundColor: colors.background,
+          borderBottomWidth: 1,
+          borderBottomColor: colors.border,
+        }}>
+          <TouchableOpacity
+            onPress={() => setShowMyRequests(false)}
+            style={{
+              backgroundColor: colors.card,
+              padding: 12,
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: colors.border,
+              ...shadows.medium,
+            }}
+          >
+            <Icon name="arrow-back" size={24} color={colors.text} />
+          </TouchableOpacity>
+          
+          <Text style={{
+            fontSize: 20,
+            fontWeight: 'bold',
+            color: colors.text,
+            textAlign: 'center',
+            flex: 1,
+          }}>
+            My Requests
+          </Text>
+          
+          <TouchableOpacity
+            onPress={() => setShowSettings(true)}
+            style={{
+              backgroundColor: colors.card,
+              padding: 12,
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: colors.border,
+              ...shadows.medium,
+            }}
+          >
+            <Icon name="settings" size={24} color={colors.text} />
+          </TouchableOpacity>
+        </View>
+
+        <MyRequestsPanel />
+
+        <SettingsBottomSheet
+          visible={showSettings}
+          onClose={() => setShowSettings(false)}
+        />
+      </View>
+    );
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <GlobalMessageBanner />
+      
       {/* Header with Settings Button */}
       <View style={{
         flexDirection: 'row',
@@ -333,7 +508,7 @@ export default function LogifyMakersApp() {
             </View>
           </View>
 
-          {/* Order Status Indicator */}
+          {/* Order Status Indicator - Non-clickable */}
           <View style={[{
             backgroundColor: colors.card,
             borderRadius: 20,
@@ -359,8 +534,7 @@ export default function LogifyMakersApp() {
               </Text>
             </View>
             
-            <TouchableOpacity
-              onPress={toggleOrderStatus}
+            <View
               style={{
                 flexDirection: 'row',
                 alignItems: 'center',
@@ -385,14 +559,14 @@ export default function LogifyMakersApp() {
               <Text style={{ color: 'white', fontSize: 18, fontWeight: 'bold', letterSpacing: 0.5 }}>
                 {orderAcceptStatus ? 'ACCEPTING ORDERS' : 'ORDERS CLOSED'}
               </Text>
-            </TouchableOpacity>
+            </View>
             
             <Text style={[{
               fontSize: 13,
               color: colors.textSecondary,
               textAlign: 'center'
             }]}>
-              {isAdmin() ? '👆 Tap to toggle status (Admin Access)' : 'Only administrators can change this status'}
+              Status can only be changed by administrators
             </Text>
           </View>
 
@@ -588,37 +762,68 @@ export default function LogifyMakersApp() {
             </TouchableOpacity>
           </View>
 
-          {/* Add Request Button */}
+          {/* Action Buttons */}
           <View style={{ paddingHorizontal: 20, width: '100%', marginBottom: 25 }}>
-            <TouchableOpacity
-              onPress={() => setShowRequestForm(!showRequestForm)}
-              disabled={submitting}
-              style={{
-                backgroundColor: submitting ? colors.grey : colors.accent,
-                padding: 22,
-                borderRadius: 16,
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                ...shadows.large,
-                opacity: submitting ? 0.7 : 1,
-              }}
-            >
-              <Icon 
-                name={submitting ? "hourglass" : (showRequestForm ? "close" : "add-circle")} 
-                size={28} 
-                color="white"
-                style={{ marginRight: 12 }} 
-              />
-              <View>
-                <Text style={{ color: 'white', fontSize: 18, fontWeight: 'bold', marginBottom: 2 }}>
-                  {submitting ? 'Submitting Request...' : (showRequestForm ? 'Close Request Form' : 'Submit New Request')}
-                </Text>
-                <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12 }}>
-                  {submitting ? 'Processing your request' : (showRequestForm ? 'Hide the request form' : 'Tell us about your project')}
-                </Text>
-              </View>
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              {/* Submit Request Button */}
+              <TouchableOpacity
+                onPress={() => setShowRequestForm(!showRequestForm)}
+                disabled={submitting}
+                style={{
+                  backgroundColor: submitting ? colors.grey : colors.accent,
+                  padding: 18,
+                  borderRadius: 16,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  ...shadows.large,
+                  opacity: submitting ? 0.7 : 1,
+                  flex: 1,
+                  marginRight: 8,
+                }}
+              >
+                <Icon 
+                  name={submitting ? "hourglass" : (showRequestForm ? "close" : "add-circle")} 
+                  size={24} 
+                  color="white"
+                  style={{ marginRight: 8 }} 
+                />
+                <View>
+                  <Text style={{ color: 'white', fontSize: 16, fontWeight: 'bold', marginBottom: 2 }}>
+                    {submitting ? 'Submitting...' : (showRequestForm ? 'Close Form' : 'New Request')}
+                  </Text>
+                  <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 10 }}>
+                    {submitting ? 'Processing...' : (showRequestForm ? 'Hide form' : 'Submit project')}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* My Requests Button */}
+              <TouchableOpacity
+                onPress={() => setShowMyRequests(true)}
+                style={{
+                  backgroundColor: colors.info,
+                  padding: 18,
+                  borderRadius: 16,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  ...shadows.large,
+                  flex: 1,
+                  marginLeft: 8,
+                }}
+              >
+                <Icon name="document-text" size={24} color="white" style={{ marginRight: 8 }} />
+                <View>
+                  <Text style={{ color: 'white', fontSize: 16, fontWeight: 'bold', marginBottom: 2 }}>
+                    My Requests
+                  </Text>
+                  <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 10 }}>
+                    View status
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* Request Form */}
@@ -672,7 +877,7 @@ export default function LogifyMakersApp() {
                 color: colors.text,
                 marginBottom: 8,
                 fontWeight: '600'
-              }]}>Your Name *</Text>
+              }]}>Your Full Name *</Text>
               <TextInput
                 style={[{
                   backgroundColor: colors.backgroundAlt,
@@ -690,6 +895,63 @@ export default function LogifyMakersApp() {
                 placeholderTextColor={colors.textSecondary}
                 value={clientName}
                 onChangeText={setClientName}
+                editable={!submitting}
+              />
+
+              {/* Email */}
+              <Text style={[{
+                fontSize: 16,
+                color: colors.text,
+                marginBottom: 8,
+                fontWeight: '600'
+              }]}>Email Address *</Text>
+              <TextInput
+                style={[{
+                  backgroundColor: colors.backgroundAlt,
+                  borderColor: colors.border,
+                  borderWidth: 1,
+                  borderRadius: 12,
+                  padding: 16,
+                  color: colors.text,
+                  fontSize: 16,
+                  minHeight: 50,
+                  marginBottom: 20,
+                  ...shadows.small,
+                }]}
+                placeholder="your.email@example.com"
+                placeholderTextColor={colors.textSecondary}
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                editable={!submitting}
+              />
+
+              {/* Discord Username */}
+              <Text style={[{
+                fontSize: 16,
+                color: colors.text,
+                marginBottom: 8,
+                fontWeight: '600'
+              }]}>Discord Username *</Text>
+              <TextInput
+                style={[{
+                  backgroundColor: colors.backgroundAlt,
+                  borderColor: colors.border,
+                  borderWidth: 1,
+                  borderRadius: 12,
+                  padding: 16,
+                  color: colors.text,
+                  fontSize: 16,
+                  minHeight: 50,
+                  marginBottom: 20,
+                  ...shadows.small,
+                }]}
+                placeholder="username#1234 or username"
+                placeholderTextColor={colors.textSecondary}
+                value={discordUsername}
+                onChangeText={setDiscordUsername}
+                autoCapitalize="none"
                 editable={!submitting}
               />
 
@@ -790,7 +1052,7 @@ export default function LogifyMakersApp() {
                 color: colors.text,
                 marginBottom: 8,
                 fontWeight: '600'
-              }]}>Contact Information *</Text>
+              }]}>Additional Contact Information *</Text>
               <TextInput
                 style={[{
                   backgroundColor: colors.backgroundAlt,
@@ -804,7 +1066,7 @@ export default function LogifyMakersApp() {
                   marginBottom: 25,
                   ...shadows.small,
                 }]}
-                placeholder="Discord username, email, or phone number"
+                placeholder="Phone number, alternative contact method, etc."
                 placeholderTextColor={colors.textSecondary}
                 value={contactInfo}
                 onChangeText={setContactInfo}

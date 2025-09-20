@@ -10,16 +10,36 @@ export interface User {
 export interface DesignRequest {
   id: string;
   client_name: string;
+  email: string;
+  discord_username: string;
   service_type: string;
   description: string;
   budget?: string;
   contact_info: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
+  status: 'pending' | 'accepted' | 'rejected' | 'in_progress' | 'completed' | 'cancelled';
   created_at: string;
+  updated_at?: string;
+  admin_notes?: string;
 }
 
 export interface WebhookConfig {
   url: string;
   enabled: boolean;
   last_tested?: string;
+}
+
+export interface GlobalMessage {
+  id: string;
+  title: string;
+  message: string;
+  type: 'info' | 'warning' | 'success' | 'error';
+  created_at: string;
+  expires_at?: string;
+  is_active: boolean;
+}
+
+export interface AdminSession {
+  isAuthenticated: boolean;
+  loginTime: string;
+  expiresAt: string;
 }

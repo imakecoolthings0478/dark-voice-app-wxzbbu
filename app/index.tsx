@@ -244,7 +244,7 @@ export default function LogifyMakersApp() {
         discord_username: ValidationService.sanitizeInput(discordUsername),
         service_type: serviceType,
         description: ValidationService.sanitizeInput(description),
-        budget: budget.trim() || undefined,
+        budget: budget.trim() ? `₹${budget.trim()}` : undefined, // Changed to INR
         contact_info: ValidationService.sanitizeInput(contactInfo),
         status: 'pending',
         created_at: new Date().toISOString(),
@@ -278,10 +278,10 @@ export default function LogifyMakersApp() {
         }
       }
 
-      // Show success message
+      // Show success popup with better styling
       Alert.alert(
-        'Request Submitted Successfully! 🎉', 
-        `Your request has been saved to our cloud database and is accessible globally! ${discordSuccess ? 'Our team has been notified via Discord and' : 'Please join our Discord for faster processing, or'} we'll contact you at ${email} with updates.\n\nRequest ID: ${requestData.id}`,
+        '🎉 Request Submitted Successfully!', 
+        `Your ${serviceType} request has been submitted and saved to our cloud database!\n\n✅ Request ID: ${requestData.id}\n📧 We'll contact you at: ${email}\n💬 Discord: ${discordUsername}\n\n${discordSuccess ? '🔔 Our team has been notified via Discord!' : '💡 Join our Discord for faster processing!'}`,
         [
           {
             text: 'View My Requests',
@@ -295,18 +295,21 @@ export default function LogifyMakersApp() {
             text: 'Join Discord',
             onPress: handleDiscordLink,
             style: 'default'
+          },
+          {
+            text: 'Done',
+            onPress: () => clearForm(),
+            style: 'cancel'
           }
         ]
       );
-
-      clearForm();
 
     } catch (error) {
       console.error('Error submitting request:', error);
       
       // Show error with emphasis on online requirement
       Alert.alert(
-        'Submission Failed ❌', 
+        '❌ Submission Failed', 
         'Failed to submit request to our cloud database. This app requires internet connection for all operations. Please check your connection and try again, or contact us directly on Discord.',
         [
           {
@@ -316,6 +319,7 @@ export default function LogifyMakersApp() {
           },
           {
             text: 'Retry',
+            onPress: handleSubmitRequest,
             style: 'default'
           }
         ]
@@ -1202,7 +1206,7 @@ export default function LogifyMakersApp() {
                   marginBottom: 24,
                   ...shadows.small,
                 }]}
-                placeholder="e.g., $50-100, €30-60, or your preferred range"
+                placeholder="e.g., 500-1000, 300-600, or your preferred range (INR)"
                 placeholderTextColor={colors.textSecondary}
                 value={budget}
                 onChangeText={setBudget}
@@ -1236,33 +1240,35 @@ export default function LogifyMakersApp() {
                 editable={!submitting}
               />
 
-              {/* Submit Button */}
-              <TouchableOpacity
+              {/* Submit Button - Standardized to match other buttons */}
+              <Button
+                text={submitting ? 'Submitting to Cloud...' : (orderAcceptStatus ? 'Submit Request' : 'Submit Anyway')}
                 onPress={handleSubmitRequest}
-                disabled={submitting}
                 style={{
                   backgroundColor: submitting ? colors.grey : (orderAcceptStatus ? colors.success : colors.warning),
-                  padding: 24,
-                  borderRadius: 20,
-                  alignItems: 'center',
-                  ...shadows.large,
                   opacity: submitting ? 0.7 : 1,
+                  borderRadius: 20,
+                  padding: 24,
+                  ...shadows.large,
                 }}
-              >
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  {submitting && (
-                    <Icon name="hourglass" size={24} color="white" style={{ marginRight: 12 }} />
-                  )}
-                  <View>
-                    <Text style={{ color: 'white', fontSize: 20, fontWeight: '800', marginBottom: 4, letterSpacing: -0.3 }}>
-                      {submitting ? 'Submitting to Cloud...' : (orderAcceptStatus ? 'Submit Request' : 'Submit Anyway')}
-                    </Text>
-                    <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 13, textAlign: 'center', fontWeight: '600' }}>
-                      {submitting ? 'Saving to global database...' : 'We&apos;ll get back to you within 24 hours'}
-                    </Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
+                textStyle={{
+                  fontSize: 18,
+                  fontWeight: '800',
+                  letterSpacing: -0.3,
+                }}
+              />
+              
+              {!submitting && (
+                <Text style={{
+                  color: colors.textSecondary,
+                  fontSize: 13,
+                  textAlign: 'center',
+                  marginTop: 12,
+                  fontWeight: '600',
+                }}>
+                  We&apos;ll get back to you within 24 hours
+                </Text>
+              )}
             </View>
           )}
 

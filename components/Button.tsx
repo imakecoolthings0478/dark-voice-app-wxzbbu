@@ -1,16 +1,34 @@
+
 import { Text, TouchableOpacity, StyleSheet, ViewStyle, TextStyle } from 'react-native';
-import { colors } from '../styles/commonStyles';
+import { useTheme } from '../contexts/ThemeContext';
+import { shadows } from '../styles/commonStyles';
 
 interface ButtonProps {
   text: string;
   onPress: () => void;
   style?: ViewStyle | ViewStyle[];
   textStyle?: TextStyle;
+  disabled?: boolean;
 }
 
-export default function Button({ text, onPress, style, textStyle }: ButtonProps) {
+export default function Button({ text, onPress, style, textStyle, disabled = false }: ButtonProps) {
+  const { colors } = useTheme();
+  
   return (
-    <TouchableOpacity style={[styles.button, style]} onPress={onPress} activeOpacity={0.7}>
+    <TouchableOpacity 
+      style={[
+        styles.button, 
+        { 
+          backgroundColor: disabled ? colors.grey : colors.accent,
+          opacity: disabled ? 0.7 : 1,
+          ...shadows.medium,
+        }, 
+        style
+      ]} 
+      onPress={onPress} 
+      activeOpacity={0.8}
+      disabled={disabled}
+    >
       <Text style={[styles.buttonText, textStyle]}>{text}</Text>
     </TouchableOpacity>
   );
@@ -18,20 +36,18 @@ export default function Button({ text, onPress, style, textStyle }: ButtonProps)
 
 const styles = StyleSheet.create({
   button: {
-    backgroundColor: colors.primary,
-    padding: 14,
-    borderRadius: 8,
-    marginTop: 10,
-    width: '100%',
-    boxShadow: '0px 2px 3.84px rgba(0, 0, 0, 0.25)',
-    elevation: 5,
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
+    minHeight: 56,
   },
   buttonText: {
-    color: '#fff',
+    color: 'white',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '700',
     textAlign: 'center',
+    letterSpacing: -0.2,
   },
 });

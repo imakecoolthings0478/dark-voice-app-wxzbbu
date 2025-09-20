@@ -97,15 +97,18 @@ export default function AdminRequestsPanel() {
     requestId: string, 
     newStatus: DesignRequest['status'], 
     adminNotes?: string
-  ) => {
+  ): Promise<boolean> => {
     try {
+      console.log(`🔄 Updating request ${requestId} to status: ${newStatus}`);
+      
       // Update in cloud first
       if (supabaseService.isReady()) {
         const result = await supabaseService.updateRequestStatus(requestId, newStatus, adminNotes);
         if (result.success) {
           console.log('✅ Request updated in cloud');
         } else {
-          console.log('❌ Failed to update in cloud:', result.error);
+          console.error('❌ Failed to update in cloud:', result.error);
+          throw new Error(`Cloud update failed: ${result.error}`);
         }
       }
 
@@ -124,21 +127,19 @@ export default function AdminRequestsPanel() {
       setRequests(updatedRequests);
       await AsyncStorage.setItem('design_requests', JSON.stringify(updatedRequests));
       
-      const statusText = newStatus === 'accepted' ? 'accepted' : 
-                        newStatus === 'rejected' ? 'rejected' : newStatus;
-      
-      Alert.alert('Success', `Request ${requestId} has been ${statusText}`);
-      console.log(`Request ${requestId} status updated to ${newStatus}`);
+      console.log(`✅ Request ${requestId} status updated to ${newStatus}`);
       
       // Extend admin session
       AdminService.extendSession();
+      
+      return true;
     } catch (error) {
-      console.error('Error updating request status:', error);
-      Alert.alert('Error', 'Failed to update request status');
+      console.error('❌ Error updating request status:', error);
+      throw error;
     }
   };
 
-  const handleAcceptRequest = (request: DesignRequest) => {
+  const handleAcceptRequest = async (request: DesignRequest) => {
     try {
       Alert.alert(
         'Accept Request',
@@ -148,24 +149,37 @@ export default function AdminRequestsPanel() {
           { 
             text: 'Accept', 
             style: 'default',
-            onPress: () => {
+            onPress: async () => {
               try {
-                updateRequestStatus(request.id, 'accepted', 'Request accepted by admin');
+                console.log('🔄 Processing accept request...');
+                const success = await updateRequestStatus(request.id, 'accepted', 'Request accepted by admin');
+                
+                if (success) {
+                  Alert.alert(
+                    'Success! 🎉',
+                    `Request from ${request.client_name} has been accepted successfully!`,
+                    [{ text: 'OK', style: 'default' }]
+                  );
+                }
               } catch (error) {
-                console.error('Error accepting request:', error);
-                Alert.alert('Error', 'Failed to accept request. Please try again.');
+                console.error('❌ Error accepting request:', error);
+                Alert.alert(
+                  'Error',
+                  `Failed to accept request: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again.`,
+                  [{ text: 'OK', style: 'default' }]
+                );
               }
             }
           }
         ]
       );
     } catch (error) {
-      console.error('Error showing accept dialog:', error);
+      console.error('❌ Error showing accept dialog:', error);
       Alert.alert('Error', 'Failed to show accept dialog. Please try again.');
     }
   };
 
-  const handleRejectRequest = (request: DesignRequest) => {
+  const handleRejectRequest = async (request: DesignRequest) => {
     try {
       Alert.prompt(
         'Reject Request',
@@ -175,13 +189,26 @@ export default function AdminRequestsPanel() {
           { 
             text: 'Reject', 
             style: 'destructive',
-            onPress: (reason) => {
+            onPress: async (reason) => {
               try {
+                console.log('🔄 Processing reject request...');
                 const adminNotes = reason || 'Request rejected by admin';
-                updateRequestStatus(request.id, 'rejected', adminNotes);
+                const success = await updateRequestStatus(request.id, 'rejected', adminNotes);
+                
+                if (success) {
+                  Alert.alert(
+                    'Request Rejected',
+                    `Request from ${request.client_name} has been rejected.${reason ? `\n\nReason: ${reason}` : ''}`,
+                    [{ text: 'OK', style: 'default' }]
+                  );
+                }
               } catch (error) {
-                console.error('Error rejecting request:', error);
-                Alert.alert('Error', 'Failed to reject request. Please try again.');
+                console.error('❌ Error rejecting request:', error);
+                Alert.alert(
+                  'Error',
+                  `Failed to reject request: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again.`,
+                  [{ text: 'OK', style: 'default' }]
+                );
               }
             }
           }
@@ -190,7 +217,7 @@ export default function AdminRequestsPanel() {
         'Please provide a brief explanation...'
       );
     } catch (error) {
-      console.error('Error showing reject dialog:', error);
+      console.error('❌ Error showing reject dialog:', error);
       // Fallback to simple alert if prompt fails
       Alert.alert(
         'Reject Request',
@@ -200,12 +227,25 @@ export default function AdminRequestsPanel() {
           { 
             text: 'Reject', 
             style: 'destructive',
-            onPress: () => {
+            onPress: async () => {
               try {
-                updateRequestStatus(request.id, 'rejected', 'Request rejected by admin');
+                console.log('🔄 Processing reject request (fallback)...');
+                const success = await updateRequestStatus(request.id, 'rejected', 'Request rejected by admin');
+                
+                if (success) {
+                  Alert.alert(
+                    'Request Rejected',
+                    `Request from ${request.client_name} has been rejected.`,
+                    [{ text: 'OK', style: 'default' }]
+                  );
+                }
               } catch (error) {
-                console.error('Error rejecting request:', error);
-                Alert.alert('Error', 'Failed to reject request. Please try again.');
+                console.error('❌ Error rejecting request (fallback):', error);
+                Alert.alert(
+                  'Error',
+                  `Failed to reject request: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again.`,
+                  [{ text: 'OK', style: 'default' }]
+                );
               }
             }
           }
